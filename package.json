@@ -1,0 +1,36 @@
+{
+  "name": "@abogartz/opencode-self-improvement",
+  "version": "0.1.0",
+  "description": "Durable memory for opencode: remember facts, decisions, and commands across sessions, plus a one-command per-repo setup (/repo-init).",
+  "main": "index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "module": "index.ts",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "index.ts",
+    "src",
+    "command",
+    "vendor",
+    "SPEC.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.31"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^7.0.2"
+  },
+  "peerDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json",
+    "memory-view": "bun run src/viewer/server.ts"
+  }
+}

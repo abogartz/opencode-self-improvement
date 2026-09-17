@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memory Viewer</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#161b22; --surface:#21262d; --border:#30363d;
+    --text:#e6edf3; --muted:#8d96a3; --accent:#2f81f7;
+    --danger:#f47067; --success:#3fb950; --warn:#d29922;
+    --radius:10px; --shadow:0 1px 3px rgba(0,0,0,.45);
+  }
+  *, *::before, *::after { box-sizing:border-box; }
+  html { color-scheme:dark; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size:14px; line-height:1.5; }
+  button { cursor:pointer; font-family:inherit; font-size:13px; line-height:1.4; }
+  button:disabled { cursor:not-allowed; opacity:.55; }
+
+  header { position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding:12px 20px; background:var(--panel); border-bottom:1px solid var(--border); box-shadow:var(--shadow); }
+  header h1 { margin:0; font-size:15px; font-weight:650; letter-spacing:-.01em; }
+  header h1 span { color:var(--accent); }
+  .spacer { flex:1; }
+
+  .counts { display:flex; gap:6px; font-size:13px; color:var(--muted); }
+  .counts b { color:var(--text); font-weight:600; }
+
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); }
+  .card h2 { margin:0; padding:12px 14px; font-size:13px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid var(--border); }
+  .card .body { padding:14px; }
+
+  main { display:flex; gap:18px; align-items:flex-start; padding:18px 20px 28px; }
+
+  .toolbar { display:flex; gap:8px; flex-wrap:wrap; padding:14px; }
+  .toolbar input[type=search] { flex:1; min-width:200px; }
+
+  .field, input, select, textarea { font-family:inherit; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:7px 10px; }
+  input:focus, select:focus, textarea:focus { border-color:var(--accent); outline:none; box-shadow:0 0 0 3px rgba(47,129,247,.25); }
+  textarea { resize:vertical; }
+
+  table { width:100%; border-collapse:separate; border-spacing:0; }
+  th, td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { position:sticky; top:0; z-index:1; background:var(--panel); font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
+  td.ts { color:var(--muted); font-size:12px; white-space:nowrap; }
+  td.content { word-break:break-word; }
+
+  .btn { padding:5px 11px; background:var(--surface); border-color:var(--border); font-weight:550; }
+  .btn:hover { filter:brightness(1.12); }
+  .btn:active { filter:brightness(.92); }
+  .btn.danger { color:#fff; background:#5d1a17; border-color:var(--danger); }
+  .btn.warn { color:#241d05; background:var(--warn); border-color:var(--warn); }
+  .btn.primary { color:#fff; background:var(--accent); border-color:var(--accent); }
+  .btn.primary:hover { filter:brightness(1.1); }
+
+  .badge { display:inline-flex; align-items:center; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid var(--border); color:var(--muted); }
+  .badge.type { color:#79b8ff; border-color:#1f4a77; background:rgba(47,129,247,.12); }
+  .badge.scope { color:#e3b341; border-color:#5a4607; background:rgba(210,153,34,.12); }
+  .badge.status-active { color:var(--success); border-color:#1f4f27; background:rgba(63,185,80,.12); }
+  .badge.status-superseded { color:var(--muted); text-decoration:line-through; }
+  .badge.status-blocked { color:#ff8e86; border-color:#5d1a17; background:rgba(244,112,103,.14); }
+  .badge.status-deleted { color:#ff8e86; border-color:#5d1a17; background:rgba(244,112,103,.14); }
+
+  .actions { white-space:nowrap; display:flex; gap:6px; justify-content:flex-end; }
+
+  .modal { position:fixed; inset:0; z-index:40; display:none; align-items:center; justify-content:center; background:rgba(1,4,9,.68); backdrop-filter:blur(2px); padding:18px; }
+  .modal.open { display:flex; }
+  .modal .box { width:640px; max-width:94vw; padding:18px; }
+  .modal h2 { margin:0 0 6px; font-size:15px; color:var(--text); }
+  .modal .muted { margin:0 0 12px; color:var(--muted); white-space:pre-wrap; }
+  .modal .row { display:flex; gap:10px; margin-bottom:12px; }
+  .modal .row input { flex:1; }
+  .modal textarea { width:100%; min-height:96px; margin-bottom:12px; display:block; }
+  .modal .btns { display:flex; gap:8px; justify-content:flex-end; }
+
+  .empty { padding:34px; text-align:center; color:var(--muted); font-size:13px; }
+  .toast { position:fixed; right:18px; bottom:18px; z-index:60; max-width:340px; padding:11px 15px; font-size:13px; }
+  .toast.error { border-color:var(--danger); color:#ff8e86; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>&#9679;</span> Memory Viewer</h1>
+  <div class="counts">
+    <span>active <b id="cActive">0</b></span>
+    <span>superseded <b id="cSuper">0</b></span>
+    <span>blocked <b id="cBlocked">0</b></span>
+    <span>deleted <b id="cDeleted">0</b></span>
+  </div>
+  <span class="spacer"></span>
+  <code id="rootLabel" style="color:var(--muted);font-size:12px"></code>
+</header>
+
+<main>
+  <section class="list">
+    <div class="card toolbar">
+      <input type="search" id="search" placeholder="Search content / scope / type…" aria-label="Search">
+      <select id="fScope"><option value="">any scope</option></select>
+      <select id="fType"><option value="">any type</option></select>
+      <select id="fStatus" title="Filter by status">
+        <option value="active">active</option>
+        <option value="all">all (incl. superseded)</option>
+        <option value="superseded">superseded</option>
+        <option value="blocked">blocked</option>
+        <option value="deleted">deleted</option>
+      </select>
+    </div>
+
+    <div class="card">
+      <table>
+        <thead><tr><th>ts</th><th>type</th><th>scope</th><th>content</th><th>status</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div id="empty" class="empty" style="display:none">No memories.</div>
+    </div>
+  </section>
+</main>
+
+<div id="editModal" class="modal">
+  <div class="box card">
+    <h2>Edit memory</h2>
+    <div class="row">
+      <input id="eType" placeholder="type" title="Memory type">
+      <input id="eScope" placeholder="scope" title="Scope">
+    </div>
+    <textarea id="eContent" placeholder="content"></textarea>
+    <input id="eReason" placeholder="reason (required, e.g. corrected after human review)" style="width:100%" title="Reason">
+    <div class="btns">
+      <button id="eCancel" class="btn">Cancel</button>
+      <button id="eSave" class="btn primary" title="Saves a new entry and marks this one superseded">Save (snapshot + supersede)</button>
+    </div>
+  </div>
+</div>
+
+<div id="promptModal" class="modal">
+  <div class="box card">
+    <h2 id="promptTitle"></h2>
+    <p id="promptHint" class="muted"></p>
+    <textarea id="promptReason" rows="2" placeholder="reason (required)" title="Reason"></textarea>
+    <div class="btns">
+      <button id="promptCancel" class="btn">Cancel</button>
+      <button id="promptOk" class="btn primary"></button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let DATA = null;
+let editingTs = null;
+
+async function api(path, body) {
+  const res = await fetch(path, body
+    ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
+    : undefined);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `${res.status} ${res.statusText}`);
+  return json;
+}
+
+function toast(msg, isError = false) {
+  const el = document.createElement("div");
+  el.className = "toast card" + (isError ? " error" : "");
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+function currentList() {
+  const fus = $("fStatus").value;
+  if (fus === "blocked") return { list: DATA.blocked, kind: "blocked" };
+  if (fus === "deleted") return { list: DATA.deleted, kind: "deleted" };
+  if (fus === "superseded") return { list: DATA.memories.filter((m) => m.superseded_by), kind: "superseded" };
+  if (fus === "all") return { list: DATA.memories, kind: "all" };
+  return { list: DATA.memories.filter((m) => !m.superseded_by), kind: "active" };
+}
+
+function render() {
+  if (!DATA) return;
+  const { list, kind } = currentList();
+  const q = $("search").value.toLowerCase();
+  const fs = $("fScope").value;
+  const ft = $("fType").value;
+  let rows = list.slice();
+  if (fs) rows = rows.filter((m) => m.scope === fs);
+  if (ft) rows = rows.filter((m) => m.type === ft);
+  if (q) rows = rows.filter((m) => `${m.type} ${m.scope} ${m.content}`.toLowerCase().includes(q));
+
+  $("rows").innerHTML = rows.map((m) => {
+    const status = kind === "blocked" ? "blocked" : kind === "deleted" ? "deleted"
+      : m.superseded_by ? "superseded" : "active";
+    const stBadge = status === "superseded" ? badge("status-superseded", `superseded \u2192 ${m.superseded_by.slice(0,8)}`)
+      : badge("status-" + status, status);
+    const actions = kind === "blocked"
+      ? `<button class="btn warn" data-action="unblock" data-ts="${esc(m.ts)}" title="Restore this memory to the read paths">unblock</button>`
+      : kind === "deleted"
+        ? `<button class="btn warn" data-action="restore-deleted" data-ts="${esc(m.ts)}" data-type="${esc(m.type)}" data-scope="${esc(m.scope)}" data-content="${esc(m.content)}" title="Re-add this deleted entry to memory">restore</button>`
+        : `<button class="btn" data-action="edit" data-ts="${esc(m.ts)}" title="Edit: snapshot, supersede this entry, append the replacement">edit</button>
+           <button class="btn danger" data-action="delete" data-ts="${esc(m.ts)}" title="Delete: snapshot the file, then remove this entry (audited)">delete</button>
+           <button class="btn danger" data-action="block" data-ts="${esc(m.ts)}" title="Block (poison): keep on disk but hide from recall/inject">block</button>`;
+    return `<tr>
+      <td class="ts">${m.ts.split("T")[0]}<br>${(m.ts.split("T")[1] || "").slice(0,8)}</td>
+      <td>${badge("type", esc(m.type))}</td>
+      <td>${badge("scope", esc(m.scope))}</td>
+      <td class="content">${esc(m.content)}</td>
+      <td>${stBadge}</td>
+      <td class="actions">${actions}</td>
+    </tr>`;
+  }).join("");
+
+  $("empty").style.display = rows.length ? "none" : "block";
+  $("cActive").textContent = DATA.memories.filter((m) => !m.superseded_by).length;
+  $("cSuper").textContent = DATA.memories.filter((m) => m.superseded_by).length;
+  $("cBlocked").textContent = DATA.blocked.length;
+  $("cDeleted").textContent = DATA.deleted.length;
+}
+
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c])); }
+
+async function refresh() {
+  DATA = await api("/api/data");
+  const scopes = [...new Set(DATA.memories.map((m) => m.scope))].sort();
+  const types = [...new Set(DATA.memories.map((m) => m.type))].sort();
+  $("fScope").innerHTML = `<option value="">any scope</option>` + scopes.map((s) => `<option>${esc(s)}</option>`).join("");
+  $("fType").innerHTML = `<option value="">any type</option>` + types.map((t) => `<option>${esc(t)}</option>`).join("");
+  $("rootLabel").textContent = DATA.roots.memoryRoot;
+  render();
+}
+
+function badge(cls, text) { return `<span class="badge ${cls}">${text}</span>`; }
+
+function openEdit(ts) {
+  const m = DATA.memories.find((x) => x.ts === ts);
+  editingTs = ts;
+  $("eType").value = m.type;
+  $("eScope").value = m.scope;
+  $("eContent").value = m.content;
+  $("eReason").value = m.reason || "";
+  $("editModal").classList.add("open");
+}
+
+async function saveEdit() {
+  const reason = $("eReason").value.trim();
+  const content = $("eContent").value.trim();
+  if (!reason) { toast("reason required", true); return; }
+  if (!content) { toast("content required", true); return; }
+  try {
+    const r = await api("/api/edit", {
+      ts: editingTs, type: $("eType").value.trim(), scope: $("eScope").value.trim(),
+      content, reason,
+    });
+    $("editModal").classList.remove("open");
+    toast(`edited \u2192 superseded ${r.superseded_by.slice(0,8)}`);
+    await refresh();
+  } catch (e) { toast(String(e.message), true); }
+}
+
+async function del(ts) {
+  askModal(
+    `Delete memory ${ts.slice(0, 19)}?`,
+    "Removes the entry on disk. A pre-delete snapshot and an audited reason are retained.",
+    "Delete",
+    async (reason) => {
+      try {
+        await api("/api/delete", { ts, reason });
+        toast("deleted (snapshot retained)");
+        await refresh();
+      } catch (e) { toast(String(e.message), true); }
+    },
+  );
+}
+
+async function block(ts) {
+  const m = DATA.memories.find((x) => x.ts === ts);
+  const preview = m ? (m.content.length > 120 ? m.content.slice(0, 120) + "…" : m.content) : "";
+  askModal(
+    `Block memory ${ts.slice(0, 19)}?`,
+    `Poison intervention — it stays on disk but is hidden from recall/inject.\n\n"${preview}"`,
+    "Block",
+    async (reason) => {
+      try {
+        await api("/api/block", { ts, reason });
+        toast("blocked — suppressed from read paths");
+        await refresh();
+      } catch (e) { toast(String(e.message), true); }
+    },
+  );
+}
+
+async function unblock(ts) {
+  try {
+    await api("/api/unblock", { ts });
+    toast("unblocked");
+    await refresh();
+  } catch (e) { toast(String(e.message), true); }
+}
+
+function restoreEntry(type, scope, content) {
+  askModal(
+    "Restore deleted memory?",
+    "Re-adds this entry to memory from its audit record.",
+    "Restore",
+    async () => {
+      try {
+        await api("/api/restore-entry", { type, scope, content });
+        toast("restored to memory");
+        await refresh();
+      } catch (e) { toast(String(e.message), true); }
+    },
+  );
+}
+
+document.addEventListener("DOMContentLoaded", refresh);
+for (const id of ["search", "fScope", "fType", "fStatus"]) $(id).addEventListener("change", render);
+$("search").addEventListener("input", render);
+$("eCancel").addEventListener("click", () => $("editModal").classList.remove("open"));
+$("eSave").addEventListener("click", saveEdit);
+
+$("rows").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-action]");
+  if (!btn) return;
+  const { action, ts } = btn.dataset;
+  if (action === "edit") openEdit(ts);
+  else if (action === "delete") del(ts);
+  else if (action === "block") block(ts);
+  else if (action === "unblock") unblock(ts);
+  else if (action === "restore-deleted") {
+    const { type, scope, content } = btn.dataset;
+    restoreEntry(type, scope, content);
+  }
+});
+
+let pending = null;
+
+function askModal(title, hint, okLabel, onOk) {
+  $("promptTitle").textContent = title;
+  $("promptHint").textContent = hint;
+  $("promptOk").textContent = okLabel;
+  $("promptReason").value = "";
+  pending = onOk;
+  $("promptModal").classList.add("open");
+  $("promptReason").focus();
+}
+
+function closePrompt() {
+  $("promptModal").classList.remove("open");
+  pending = null;
+}
+
+$("promptCancel").addEventListener("click", closePrompt);
+$("promptOk").addEventListener("click", () => {
+  const reason = $("promptReason").value.trim();
+  if (!reason) { toast("reason required", true); return; }
+  const fn = pending;
+  closePrompt();
+  if (fn) fn(reason);
+});
+$("promptModal").addEventListener("click", (e) => {
+  if (e.target === $("promptModal")) closePrompt();
+});
+</script>
+</body>
+</html>
