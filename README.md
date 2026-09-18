@@ -31,15 +31,42 @@ That's it. Rerun `/repo-init force` after a refactor to refresh.
 
 ## How to install
 
-Clone the repo 
+1. Clone this repo:
+
+   ```sh
+   git clone https://github.com/abogartz/opencode-self-improvement.git
+   cd opencode-self-improvement
+   bun install
+   ```
+
+2. Point opencode at the plugin. Add a `plugin` entry to your opencode config —
+   `~/.config/opencode/opencode.json` (global) or any project `opencode.json`:
+
+   ```json
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "plugin": ["/full/path/to/opencode-self-improvement/index.ts"]
+   }
+   ```
+
+3. Quit and restart opencode. The plugin loads and `/repo-init` installs itself.
+   Nothing else to do.
+
+## Code graph (optional)
+
+`/repo-init` also indexes the repo into a queryable knowledge graph via
+[`codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp),
+pinned to `0.11.0` as an optional dependency, so it comes in with the
+`bun install` above. If a copy is already on your `PATH`, that one is used
+instead; override explicitly with `OPENCODE_CBM_BIN=/path/to/codebase-memory-mcp`.
+When no graph binary is available, `/repo-init` still records scripts and the
+init stamp — the graph is a lookup bonus, not a requirement (see below).
+
+Manual install of the pinned binary (if you want it globally):
 
 ```sh
-opencode plugin @bogartz/opencode-self-improvement@latest --global --force
+curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash
 ```
-
-This installs the package and registers it in your opencode config. Restart
-opencode — the plugin loads and `/repo-init` installs itself automatically.
-Nothing else to do.
 
 ## First use
 
@@ -63,9 +90,9 @@ Run `bun memory-view` in your terminal and visit  http://127.0.0.1:8787 in your 
 
 | Problem | Fix |
 | --- | --- |
-| `memory_*` tools not available | The plugin didn't load. Restart opencode and check the `plugin` entry is spelled `@bogartz/opencode-self-improvement`. |
+| `memory_*` tools not available | The plugin didn't load. Restart opencode and check the `plugin` entry points at `<clone>/index.ts`. |
 | `/repo-init` missing from the command list | The self-install couldn't write to `~/.config/opencode/commands/` (e.g. read-only config dir). Create it, restart, or just ask the model to "init memory for this repo" — it calls the same tool. |
-| Init says `Graph: unavailable` | `codebase-memory-mcp` isn't on your PATH. Install it, or point `OPENCODE_CBM_BIN` at the binary. Scripts are still remembered without it. |
-| Stale plugin after an update | opencode caches packages in `~/.cache/opencode/node_modules/`; remove the `@bogartz/opencode-self-improvement` folder there and restart. |
+| Init says `Graph: unavailable` | `codebase-memory-mcp` couldn't start (not installed, or its once-only download is blocked). Install pinned `0.11.0` via the one-liner above, or point `OPENCODE_CBM_BIN` at the binary. Scripts are still remembered without it. |
+| Stale plugin after an update | `git pull` the clone and restart opencode. |
 | Reset all memories | Delete `~/.config/opencode/memory/`. |
 

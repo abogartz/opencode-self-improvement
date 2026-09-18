@@ -3,6 +3,7 @@
 // under $OPENCODE_MEMORY_DIR when set (tests use this for hermetic runs).
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export function memoryRoot(): string {
   return (
@@ -43,6 +44,17 @@ export function dateStr(d: Date = new Date()): string {
 // Optional live-graph binary. When present the resolver cross-checks the local
 // source scan against the codebase-memory-mcp file graph; when absent the local
 // scan alone is authoritative (install-from-scratch requirement).
+// Discovery order: OPENCODE_CBM_BIN override, an already-installed global on
+// PATH (matches a running MCP session's build), then the pinned npm copy
+// (codebase-memory-mcp is an optionalDependency of this package).
 export function cbmBin(): string | undefined {
-  return process.env.OPENCODE_CBM_BIN || undefined;
+  if (process.env.OPENCODE_CBM_BIN) return process.env.OPENCODE_CBM_BIN;
+  if (Bun.which("codebase-memory-mcp")) return undefined;
+  try {
+    const resolved = import.meta.resolve("codebase-memory-mcp/bin.js");
+    if (resolved.startsWith("file://")) return fileURLToPath(resolved);
+  } catch {
+    // optional graph dependency not installed; PATH lookup still applies
+  }
+  return undefined;
 }
