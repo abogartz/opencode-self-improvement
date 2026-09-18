@@ -1,5 +1,5 @@
 {
-  "name": "@abogartz/opencode-self-improvement",
+  "name": "opencode-self-improvement",
   "version": "0.1.0",
   "description": "Durable memory for opencode: remember facts, decisions, and commands across sessions, plus a one-command per-repo setup (/repo-init).",
   "main": "index.ts",
