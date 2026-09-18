@@ -8,6 +8,8 @@ import { memoryRoot, deletionsFile, snapshotDir } from "./config.ts";
 import { appendLog, ensureDir, formatLine, parseLine, readLines } from "./logfmt.ts";
 import { blockedTs } from "./blocklist.ts";
 
+export type MemoryStatus = "open" | "settled";
+
 export interface Memory {
   ts: string;
   type: string;
@@ -17,6 +19,7 @@ export interface Memory {
   tags?: string[];
   superseded_by?: string;
   reason?: string;
+  status?: MemoryStatus;
   file: string;
   index: number;
 }
@@ -43,6 +46,8 @@ function toMemory(fields: Record<string, unknown>, file: string, index: number):
     tags: typeof fields.tags === "string" ? fields.tags.split(",") : undefined,
     superseded_by: typeof fields.superseded_by === "string" ? fields.superseded_by : undefined,
     reason: typeof fields.reason === "string" ? fields.reason : undefined,
+    status:
+      fields.status === "open" || fields.status === "settled" ? fields.status : undefined,
     file,
     index,
   };
@@ -85,6 +90,7 @@ export interface AppendMemoryInput {
   content: string;
   issue?: string;
   tags?: string[];
+  status?: MemoryStatus;
 }
 
 // Existing ts values across all memory files, used to guarantee uniqueness of
@@ -119,6 +125,7 @@ export async function appendMemory(input: AppendMemoryInput): Promise<string> {
       content: input.content,
       issue: input.issue,
       tags: input.tags?.length ? input.tags.join(",") : undefined,
+      status: input.status,
     }),
   );
   return ts;

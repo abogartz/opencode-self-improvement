@@ -66,6 +66,7 @@ export async function editMemory(input: EditInput): Promise<MutationResult> {
     content: input.content,
     issue: input.issue,
     tags: input.tags,
+    status: target.status,
   });
   await markSuperseded(input.ts, {
     superseded_by: newTs,

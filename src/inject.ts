@@ -2,8 +2,14 @@
 // pulled on demand, not pushed wholesale. Deterministic memory-first injection
 // rides chat.message (synthetic parts), so relevant knowledge is in the model's
 // context before it chooses any tool. Contextual pull rides grep/glob/read
-// results. Evidence is never injected (invariant I3).
+// results. Evidence is never injected (invariant I3). Open threads (status=
+// "open") get a single capped frontier block in the digest so planning sessions
+// start at the previous session's frontier instead of re-deriving it.
 import { isActive, loadAll, type Memory } from "./memory.ts";
+import { record } from "./evidence.ts";
+import { dateStr } from "./config.ts";
+import { bracketList } from "./logfmt.ts";
+import { recentConvergenceSummary } from "./triggers.ts";
 
 export interface TransformOutput {
   system: string[];
@@ -23,7 +29,8 @@ function dateOf(ts: string): string {
 }
 
 export function formatMemory(m: Memory): string {
-  return `- [${dateOf(m.ts)}] ${m.type}/${m.scope}: ${m.content}`;
+  const tag = m.status === "open" ? " [open]" : "";
+  return `- [${dateOf(m.ts)}]${tag} ${m.type}/${m.scope}: ${m.content}`;
 }
 
 function argText(args: unknown): string {
@@ -54,10 +61,19 @@ function scoreMemories(term: string, mems: Memory[], limit: number): Memory[] {
       return { m, score };
     })
     .filter((s) => s.score > 0)
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => b.score - a.score || openRank(b.m) - openRank(a.m))
     .slice(0, limit)
     .map((s) => s.m);
 }
+
+function openRank(m: Memory): number {
+  return m.status === "open" ? 1 : 0;
+}
+
+// Only the newest open threads are surfaced, and each session sees the block
+// once (per process), so the frontier costs a bounded number of tokens.
+const OPEN_THREAD_LIMIT = 3;
+const frontierInjectedSessions = new Set<string>();
 
 export async function systemDigest(
   _input: unknown,
@@ -70,6 +86,43 @@ export async function systemDigest(
     "\n## Persistent memory (opencode-self-improvement)\n" +
       `${mems.length} durable memories; latest: ${latest}. ` +
       "Check memory_recall BEFORE grepping or reading, for build/test/lint commands, decisions, and conventions. Relevant memories are also auto-injected when your message matches.",
+  );
+
+  const open = mems
+    .filter((m) => m.status === "open")
+    .sort((a, b) => (a.ts < b.ts ? 1 : -1))
+    .slice(0, OPEN_THREAD_LIMIT);
+  if (!open.length) return;
+
+  output.system.push(
+    "\n## Open threads (frontier)\n" + open.map(formatMemory).join("\n"),
+  );
+
+  // Aggregate of past sessions' convergence (one line, gated on data existing;
+  // I3: it is a derived fact, never the raw log). Gives the next session the
+  // signal to recall-first and stop re-deriving.
+  const conv = await recentConvergenceSummary();
+  if (conv) output.system.push(`\nConvergence tracking: ${conv}`);
+
+  const sid =
+    typeof _input === "object" && _input !== null &&
+    "sessionID" in _input &&
+    typeof (_input as Record<string, unknown>).sessionID === "string"
+      ? String((_input as Record<string, unknown>).sessionID)
+      : "?";
+  if (frontierInjectedSessions.has(sid)) return;
+  frontierInjectedSessions.add(sid);
+  const openMems = mems.filter((m) => m.status === "open");
+  await record(
+    "frontier_injected",
+    {
+      session: sid,
+      scopes: bracketList([...new Set(open.map((m) => m.scope))]),
+      shown: open.length,
+      open_total: openMems.length,
+      ts_since: dateStr(),
+    },
+    false,
   );
 }
 

@@ -12,6 +12,12 @@ export interface ToolResult {
   gateCheck?: boolean;
 }
 
+export interface FirstTap {
+  call: string;
+  turn: number;
+  ts: string;
+}
+
 export interface SessionState {
   sid: string;
   calls: ToolResult[];
@@ -23,6 +29,25 @@ export interface SessionState {
     cmd: string;
     chain: ToolResult[];
   } | null;
+  // Session-convergence tracking (time-to-frontier): completed-message count,
+  // first activity time, and the first memory_recall that surfaced an open
+  // thread. Deterministic: derived only from queued messages and tool results.
+  turns: number;
+  firstActivityTs?: string;
+  firstTap?: FirstTap;
+  finalized: boolean;
+}
+
+// Newest message-bearing session seen this process. Opening a session finalizes
+// the previous one (there is no session-end hook on the host surface).
+let lastSeenSidVar: string | null = null;
+
+export function lastSeenSid(): string | null {
+  return lastSeenSidVar;
+}
+
+export function setLastSeenSid(sid: string): void {
+  lastSeenSidVar = sid;
 }
 
 const sessions = new Map<string, SessionState>();
@@ -30,7 +55,7 @@ const sessions = new Map<string, SessionState>();
 export function session(sid: string): SessionState {
   let s = sessions.get(sid);
   if (!s) {
-    s = { sid, calls: [], lastByTool: new Map(), pendingGate: null };
+    s = { sid, calls: [], lastByTool: new Map(), pendingGate: null, turns: 0, finalized: false };
     sessions.set(sid, s);
   }
   return s;
@@ -59,4 +84,5 @@ export function getCurrent(): { sid: string; call: string; tool: string } {
 export function resetState(): void {
   sessions.clear();
   current = { sid: "?", call: "?", tool: "?" };
+  lastSeenSidVar = null;
 }

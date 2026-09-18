@@ -1,8 +1,14 @@
 // Deterministic reflection triggers T1/T2/T4. Evidence capture is driven by
 // tool results, never by a model decision. Nothing here injects into chat.
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { record } from "./evidence.ts";
+import { evidenceDir } from "./config.ts";
+import { parseLine, readLines } from "./logfmt.ts";
 import {
   session,
+  setLastSeenSid,
+  lastSeenSid,
   type ToolResult,
 } from "./state.ts";
 
@@ -16,6 +22,18 @@ export interface AfterInput {
 export interface AfterOutput {
   output?: unknown;
   metadata?: Record<string, unknown>;
+}
+
+// Code-touching tools. Seeing one of these in the session is evidence the model
+// actually engaged with the code it later writes about (GATE-4's behavior-
+// grounded injection): reading/grepping a shot of live code, editing it, or
+// running commands. Empirical behavior substitutes for hand-copied refs.
+const ENGAGEMENT_TOOLS = new Set(["grep", "glob", "read", "edit", "write", "bash", "shell"]);
+
+// True once the session has exercised the codebase (T1/T4 capture uses the same
+// whitelist, so engagement == "a tool_result was recorded for a code tool").
+export function hasEngagement(sid: string): boolean {
+  return session(sid).calls.some((c) => ENGAGEMENT_TOOLS.has(c.tool));
 }
 
 const GATE_CMDS: [RegExp, string][] = [
@@ -157,6 +175,7 @@ export async function onCompacting(input: AfterInput): Promise<void> {
     },
     false,
   );
+  await finalizeSession(sid);
 }
 
 export function evidenceCalls(sid: string): string[] {
@@ -165,4 +184,109 @@ export function evidenceCalls(sid: string): string[] {
 
 export function hasGateCheck(sid: string): boolean {
   return session(sid).calls.some((c) => c.gateCheck === true);
+}
+
+// ---- Session-convergence tracking (time-to-frontier) -----------------------
+// The measurable win: sessions should reach the previous frontier quickly and
+// stop re-deriving/ re-litigating. Everything here is deterministic — turn
+// counts from completed messages, "frontier tap" from the FIRST memory_recall
+// that surfaced an open thread, re-derivation from grep/glob/read results. The
+// per-session rollup lands in EVIDENCE (data, never chat — I3), and only a
+// tiny aggregate fact may ride the frontier block in the digest.
+
+export function markTurn(sid: string): void {
+  const s = session(sid);
+  s.turns++;
+  if (!s.firstActivityTs) s.firstActivityTs = new Date().toISOString();
+}
+
+export function markFrontierTap(sid: string, call: string): void {
+  const s = session(sid);
+  if (s.firstTap) return;
+  s.firstTap = { call, turn: s.turns, ts: new Date().toISOString() };
+}
+
+export function firstFrontierTap(sid: string): { call: string; turn: number; ts: string } | undefined {
+  return session(sid).firstTap;
+}
+
+// Idempotent per-session rollup. Emitted only when the session had any
+// activity (a message or a tool result), so noise-free sessions stay silent.
+export async function finalizeSession(sid: string): Promise<void> {
+  const s = session(sid);
+  if (s.finalized) return;
+  s.finalized = true;
+  if (s.calls.length === 0 && s.turns === 0) return;
+  const tap = s.firstTap;
+  const start = s.firstActivityTs ?? s.calls[0]?.ts;
+  const ms =
+    tap && start ? Math.max(0, Date.parse(tap.ts) - Date.parse(start)) : undefined;
+  await record(
+    "session_convergence",
+    {
+      session: sid,
+      turns: s.turns,
+      tap_at: tap ? tap.call : "-",
+      turns_to_tap: tap ? tap.turn : undefined,
+      re_derives: s.calls.filter((c) => ["grep", "glob", "read"].includes(c.tool)).length,
+      ms_to_tap: ms,
+      calls: s.calls.length,
+    },
+    false,
+  );
+}
+
+// Called from chat.message: opening a new session closes the previous one
+// (the host has no session-end hook, so a push handoff — new session in the
+// same process — is the closest deterministic close).
+export async function checkNewSession(sid: string): Promise<void> {
+  if (sid === lastSeenSid()) return;
+  const prev = lastSeenSid();
+  if (prev) await finalizeSession(prev);
+  setLastSeenSid(sid);
+}
+
+// Tiny aggregate for the frontier digest block: how many recent sessions
+// reached the frontier, and how fast on average. Data-only; never the evidence
+// logfmt itself. Empty string when there is no measurement yet (fresh install).
+// Merges two evidence streams: the per-session rollup (has turns_to_tap) and
+// the frontier_tapped rows (a tap that landed AFTER the session was finalized
+// at compaction — the late-tap race — so the rollup's tap_at was already "-").
+export async function recentConvergenceSummary(limit = 6): Promise<string> {
+  const dir = evidenceDir();
+  if (!existsSync(dir)) return "";
+  const files: string[] = [];
+  for await (const f of new Bun.Glob("*.logfmt").scan(dir)) files.push(join(dir, f));
+  files.sort();
+  // sid -> tap turn from frontier_tapped rows (late taps lost from rollups).
+  const lateTaps = new Map<string, number>();
+  const rows: { session: string; turn: number | null }[] = [];
+  for (const file of files) {
+    for (const line of await readLines(file)) {
+      const p = parseLine(line);
+      if (!p) continue;
+      if (p.ev === "frontier_tapped" && typeof p.sid === "string") {
+        const t = Number(p.turn);
+        if (Number.isFinite(t) && !lateTaps.has(p.sid)) lateTaps.set(p.sid, t);
+      } else if (p.ev === "session_convergence") {
+        const tap =
+          typeof p.turns_to_tap === "string" && p.turns_to_tap !== ""
+            ? Number(p.turns_to_tap)
+            : NaN;
+        rows.push({
+          session: String(p.session ?? ""),
+          turn: Number.isFinite(tap) ? tap : null,
+        });
+      }
+    }
+  }
+  const recent = rows.slice(-limit);
+  const tapped = recent.filter(
+    (r) => r.turn !== null || lateTaps.has(r.session),
+  );
+  if (!recent.length || !tapped.length) return "";
+  const sum = tapped.reduce((a, r) => a + (r.turn ?? lateTaps.get(r.session) ?? 0), 0);
+  const avg = sum / tapped.length;
+  const label = avg % 1 === 0 ? String(avg) : avg.toFixed(1);
+  return `${recent.length} sessions tracked, ${tapped.length} reached the frontier (first tap ~${label} turns)`;
 }

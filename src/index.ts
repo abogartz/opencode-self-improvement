@@ -10,6 +10,7 @@ import { loadAll, isActive, markSuperseded, type Memory } from "./memory.ts";
 import { runWriteGate, type GateContext, type WriteCandidate } from "./gates.ts";
 import { pruneMemory } from "./prune.ts";
 import { listSnapshots, restoreSnapshot } from "./undo.ts";
+import { record } from "./evidence.ts";
 import {
   contextualPull,
   formatMemory,
@@ -18,11 +19,22 @@ import {
 } from "./inject.ts";
 import { formatInit, runInit } from "./init.ts";
 import { ensureInitCommand } from "./command.ts";
-import { afterTool, evidenceCalls, hasGateCheck, onCompacting } from "./triggers.ts";
+import {
+  afterTool,
+  checkNewSession,
+  evidenceCalls,
+  firstFrontierTap,
+  hasEngagement,
+  hasGateCheck,
+  markFrontierTap,
+  markTurn,
+  onCompacting,
+} from "./triggers.ts";
 import { getCurrent, setCurrent } from "./state.ts";
 import { readLines } from "./logfmt.ts";
 
 const TYPES = ["decision", "learning", "preference", "blocker", "context", "pattern"] as const;
+const STATUSES = ["open", "settled"] as const;
 
 function scoreMemory(m: Memory, q: string): number {
   const hay = `${m.type} ${m.scope} ${m.content}`.toLowerCase();
@@ -43,7 +55,20 @@ export const SelfImprovement: Plugin = async (ctx) => {
     liveRoot,
     evidenceCalls: evidenceCalls(getCurrent().sid),
     hasGateCheck: hasGateCheck(getCurrent().sid),
+    hasEngagement: hasEngagement(getCurrent().sid),
   });
+
+  // Fail-closed hook guard: the plugin's own bookkeeping can never take down a
+  // tool call, the system transform, or compaction. The host surface must be
+  // safe even when the memory store is missing or corrupt (robustness contract:
+  // memory is a best-effort feature, the IDE/tool loop is not).
+  async function guarded(name: string, fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (err) {
+      console.warn(`[opencode-self-improvement] ${name} hook failed (ignored):`, err);
+    }
+  }
 
   const remember = tool({
     description:
@@ -54,6 +79,10 @@ export const SelfImprovement: Plugin = async (ctx) => {
       content: tool.schema.string().describe("The memory content"),
       issue: tool.schema.string().optional().describe("Related issue"),
       tags: tool.schema.array(tool.schema.string()).optional(),
+      status: tool.schema
+        .enum(STATUSES)
+        .optional()
+        .describe('open = live planning thread / frontier (surfaced at session start); settled or omitted = durable knowledge'),
     },
     async execute(args) {
       const candidate: WriteCandidate = {
@@ -62,6 +91,7 @@ export const SelfImprovement: Plugin = async (ctx) => {
         content: args.content,
         issue: args.issue,
         tags: args.tags,
+        status: args.status,
       };
       const outcome = await runWriteGate(candidate, gateContext());
       if (outcome.action === "promoted") {
@@ -70,7 +100,9 @@ export const SelfImprovement: Plugin = async (ctx) => {
       if (outcome.action === "collapsed") {
         return `Duplicate ignored: ${args.type}/${args.scope}`;
       }
-      return `Write blocked at GATE (${outcome.reason}). Evidence recorded; inspect with memory_evidence.`;
+      return `Write blocked at GATE (${outcome.reason}). ${
+        outcome.hint ?? "Evidence recorded; inspect with memory_evidence."
+      }`;
     },
   });
 
@@ -115,6 +147,19 @@ export const SelfImprovement: Plugin = async (ctx) => {
       const limit = args.limit || 20;
       const limited = args.query ? results.slice(0, limit) : results.slice(-limit);
       if (!limited.length) return "No matching memories";
+      const openIn = limited.filter((m) => m.status === "open").length;
+      if (openIn > 0) {
+        // Time-to-frontier signal: the session surfaced an open thread on its
+        // first recall-to-frontier (deterministic — computed from data, not
+        // from any model judgment about its own behavior).
+        const cur = getCurrent();
+        markFrontierTap(cur.sid, cur.call);
+        await record("frontier_tapped", {
+          n_open: openIn,
+          in_results: limited.length,
+          turn: firstFrontierTap(cur.sid)?.turn,
+        });
+      }
       return `Found ${results.length} (${total} total)\n\n${limited.map(formatMemory).join("\n")}`;
     },
   });
@@ -126,6 +171,7 @@ export const SelfImprovement: Plugin = async (ctx) => {
       type: tool.schema.enum(TYPES),
       content: tool.schema.string(),
       query: tool.schema.string().optional(),
+      status: tool.schema.enum(STATUSES).optional(),
     },
     async execute(args) {
       const prior = (await loadAll()).filter(
@@ -133,7 +179,7 @@ export const SelfImprovement: Plugin = async (ctx) => {
       );
       const target = prior[prior.length - 1];
       const outcome = await runWriteGate(
-        { type: args.type, scope: args.scope, content: args.content },
+        { type: args.type, scope: args.scope, content: args.content, status: args.status },
         gateContext(),
       );
       if (outcome.action === "promoted" && outcome.ts && target) {
@@ -145,7 +191,7 @@ export const SelfImprovement: Plugin = async (ctx) => {
       }
       if (outcome.action === "promoted") return `Remembered: ${args.type} in ${args.scope}`;
       if (outcome.action === "collapsed") return `Duplicate ignored: ${args.type}/${args.scope}`;
-      return `Write blocked at GATE (${outcome.reason}).`;
+      return `Write blocked at GATE (${outcome.reason}). ${outcome.hint ?? ""}`.trimEnd();
     },
   });
 
@@ -227,15 +273,19 @@ export const SelfImprovement: Plugin = async (ctx) => {
       memory_evidence: evidence,
     },
     "tool.execute.before": async (input) => {
-      setCurrent(input);
+      await guarded("tool.execute.before", async () => setCurrent(input));
     },
     "tool.execute.after": async (input, output) => {
-      setCurrent(input);
-      await afterTool(input, output);
-      await contextualPull(input, output);
+      await guarded("tool.execute.after", async () => {
+        setCurrent(input);
+        await afterTool(input, output);
+        await contextualPull(input, output);
+      });
     },
     "experimental.chat.system.transform": async (_input, output) => {
-      await systemDigest(_input, output);
+      await guarded("experimental.chat.system.transform", async () =>
+        systemDigest(_input, output),
+      );
     },
     "chat.message": async (input, output) => {
       try {
@@ -244,6 +294,12 @@ export const SelfImprovement: Plugin = async (ctx) => {
         if (!messageID?.startsWith("msg")) {
           console.warn("[opencode-self-improvement] chat.message: no message id, skipping injection");
           return;
+        }
+        // Time-to-frontier bookkeeping rides real messages only (compaction
+        // model calls never reach here because their message id is absent).
+        if (typeof input.sessionID === "string") {
+          markTurn(input.sessionID);
+          await checkNewSession(input.sessionID);
         }
         const text = output.parts
           .filter((p) => p.type === "text")
@@ -265,7 +321,9 @@ export const SelfImprovement: Plugin = async (ctx) => {
       }
     },
     "experimental.session.compacting": async (input) => {
-      await onCompacting(input);
+      await guarded("experimental.session.compacting", async () =>
+        onCompacting(input),
+      );
     },
   };
 };

@@ -28,12 +28,18 @@ export interface WriteCandidate {
   content: string;
   issue?: string;
   tags?: string[];
+  status?: "open" | "settled";
 }
 
 export interface GateContext {
   liveRoot: string;
   evidenceCalls: string[];
   hasGateCheck: boolean;
+  // True when the session exercised the code (read/grep/edit/bash results
+  // recorded). Empirical engagement substitutes for hand-copied refs (gate
+  // injection): the write encodes behavior that actually happened here, so the
+  // formal gate check is not the only admissible grounding.
+  hasEngagement?: boolean;
   // Plugin-authored bookkeeping (e.g. init stamps, script memories) bypasses
   // the GATE-4 ambiguity rule: it embeds no refs and has no completion-gate
   // evidence by construction, but is still evaluated by GATE-1/2/3.
@@ -45,6 +51,7 @@ export interface GateOutcome {
   reason?: string;
   ts?: string;
   chain: string;
+  hint?: string;
 }
 
 const STOPWORDS = new Set([
@@ -84,6 +91,19 @@ function jaccard(a: string[], b: string[]): number {
   for (const t of sa) if (sb.has(t)) inter++;
   const union = sa.size + sb.size - inter;
   return union === 0 ? 0 : inter / union;
+}
+
+// Planning-flavored content (frontier/thread/proposal language). Used only to
+// turn GATE-4's ambiguous block into a hint pointing at the open-thread home.
+const PLANNING_WORDS = new Set([
+  "plan", "plans", "planned", "planning", "frontier", "propos", "proposal",
+  "open", "goal", "goals", "decide", "decides", "decided", "deciding",
+  "reject", "rejects", "rejected", "thread", "should", "option", "options",
+  "candidate", "candidates", "next", "roadmap", "scale", "overhead", "bloat",
+]);
+
+function looksPlanning(candidate: WriteCandidate): boolean {
+  return tokens(candidate.content).some((t) => PLANNING_WORDS.has(t));
 }
 
 interface CanonEntry {
@@ -334,19 +354,26 @@ export async function runWriteGate(
   let overlapMatch: Memory | undefined;
   let overlapScore = 0;
 
-  if (conflictProne) {
-    if (canon?.aligns && exact && !exact.superseded_by) {
-      // Canonical echo: the incoming restates the registry value and already
-      // exists as an active entry -> collapse.
-      collapseMatch = exact;
-    } else if (!canon && divergent.length) {
+  if (
+    exact &&
+    !exact.superseded_by &&
+    (canon?.aligns || !(conflictProne && divergent.length))
+  ) {
+    // Byte-identical duplicate collapses (Principle 2) — exactness is
+    // independent of the canonical registry, so a decided/preferred fact
+    // restated verbatim is never "conflicting" content on its own. Two
+    // exceptions keep the S4/S4b semantics: a canonical that aligns resolves
+    // the rivalry (echo collapses), but a scope already holding RIVAL
+    // decision/preference entries with no resolving canon keeps the exact
+    // restatement review-gated — dedup must not silently bury a conflict.
+    collapseMatch = exact;
+  } else if (conflictProne) {
+    if (!canon && divergent.length) {
       // Conflicting decisions without a registry entry -> review-gated merge.
       overlapMatch = divergent[0];
       overlapScore =
         Math.round(jaccard(tokens(candidate.content), tokens(divergent[0].content)) * 100) / 100;
     }
-  } else if (exact) {
-    collapseMatch = exact;
   } else {
     let best: { m: Memory; score: number } | undefined;
     for (const m of active) {
@@ -395,11 +422,21 @@ export async function runWriteGate(
   if (!ctx.hasGateCheck) flags.push("no_evidence_refs");
   // A canonical-registry hit is itself authority, so it lifts the ambiguity
   // rule (S4b-i promotes with no embedded refs and no completion-gate call).
+  // An explicit status="open" is the planning-object home: those entries are
+  // provisional by definition (not claims about code), so only a missing scope
+  // keeps them ambiguous. Empirical engagement (a completion-gate run, or any
+  // read/grep/edit/run of the code in-session) grounds settled claims too:
+  // the write is the residue of behavior that actually happened here, so
+  // hand-copied refs are redundant (gate injection).
+  const planningObject = candidate.status === "open";
+  const behaviorGrounded = ctx.hasGateCheck || ctx.hasEngagement === true;
   const ambiguous =
-    !ctx.trusted && !canon && (candidate.scope === "" || (g1.refs === 0 && !ctx.hasGateCheck));
+    !ctx.trusted && !canon &&
+    (candidate.scope === "" || (!planningObject && g1.refs === 0 && !behaviorGrounded));
 
   let blockReason: string | undefined;
   let blockFlags: string[] = [];
+  let hint: string | undefined;
   if (g1.candidateStale) {
     blockReason = "drift_ref_stale_incoming";
     blockFlags = ["incoming_embeds_pre_drift_ref"];
@@ -416,6 +453,10 @@ export async function runWriteGate(
   } else if (ambiguous && !collapseMatch) {
     blockReason = "ambiguous_memory";
     blockFlags = flags;
+    if (looksPlanning(candidate)) {
+      hint =
+        'Looks like an open planning thread. Retry with status="open" and a non-empty scope to store it as a frontier item, or run the completion gates to ground it.';
+    }
   }
 
   if (blockReason) {
@@ -431,11 +472,21 @@ export async function runWriteGate(
         chain,
       });
     }
-    return { action: "blocked", reason: blockReason, chain };
+    return { action: "blocked", reason: blockReason, chain, hint };
   }
 
   if (collapseMatch) {
     return { action: "collapsed", chain };
+  }
+
+  // The write is specifically promoted on engagement (no refs, no gate check,
+  // not canonical, not an open object). Emitted so the precedent is auditable.
+  const groundedByEngagement =
+    !ctx.trusted && !canon && !planningObject &&
+    g1.refs === 0 && !ctx.hasGateCheck &&
+    ctx.hasEngagement === true && candidate.scope !== "";
+  if (groundedByEngagement) {
+    await record("gate_injected", { gate: 4, chain });
   }
 
   const snapshot = await snapshotFiles([join(memoryRoot(), `${new Date().toISOString().split("T")[0]}.logfmt`)]);
@@ -446,12 +497,14 @@ export async function runWriteGate(
     mem: ts,
     scope: candidate.scope,
     type: candidate.type,
+    status: candidate.status ?? "settled",
     ch,
     supersedes: supersededTs ?? "-",
     canonical: canon ? `canonical.logfmt:${canon.entry.ts}` : "-",
     evidence_refs: bracketList(ctx.evidenceCalls),
     snapshot: snapshot[0] ?? "-",
     trusted: ctx.trusted ? true : undefined,
+    grounded_by: groundedByEngagement ? "engagement" : undefined,
     chain,
   });
   return { action: "promoted", ts, chain };
