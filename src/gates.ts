@@ -1,4 +1,4 @@
-// The 4-gate write pipeline. Behaviors are the contract (SPEC.md): GATE-1
+// The 4-gate write pipeline: GATE-1
 // canonical-graph correctness, GATE-2 stale-ref scan + supersession, GATE-3
 // dedup, GATE-4 promotion/block. Every step emits an ordered evidence line.
 import { join } from "node:path";
@@ -86,7 +86,7 @@ function jaccard(a: string[], b: string[]): number {
   return union === 0 ? 0 : inter / union;
 }
 
-export interface CanonEntry {
+interface CanonEntry {
   ts: string;
   entity: string;
   value: string;
@@ -94,7 +94,7 @@ export interface CanonEntry {
   source: string;
 }
 
-export async function loadCanonical(): Promise<CanonEntry[]> {
+async function loadCanonical(): Promise<CanonEntry[]> {
   const lines = await readLines(canonicalFile());
   const out: CanonEntry[] = [];
   for (const line of lines) {
@@ -112,7 +112,7 @@ export async function loadCanonical(): Promise<CanonEntry[]> {
   return out;
 }
 
-export function canonicalMatch(
+function canonicalMatch(
   scope: string,
   content: string,
   registry: CanonEntry[],

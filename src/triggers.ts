@@ -44,7 +44,7 @@ function exitCode(out: AfterOutput): number | undefined {
   return typeof v === "number" ? v : undefined;
 }
 
-export function classify(tool: string, cmd: string, out: AfterOutput): "FAIL" | "PASS" {
+function classify(tool: string, out: AfterOutput): "FAIL" | "PASS" {
   const text = typeof out.output === "string" ? out.output : "";
   if (tool === "bash" || tool === "shell") {
     const code = exitCode(out);
@@ -57,7 +57,6 @@ export function classify(tool: string, cmd: string, out: AfterOutput): "FAIL" | 
     if (/\d+\s+match/i.test(text)) return "PASS";
     return text.trim() ? "PASS" : "FAIL";
   }
-  void cmd;
   return "PASS";
 }
 
@@ -72,7 +71,7 @@ export async function afterTool(input: AfterInput, out: AfterOutput): Promise<vo
   const call = typeof input.callID === "string" ? input.callID : "?";
   const cmd = argString(input.args);
   const text = typeof out.output === "string" ? out.output : "";
-  const status = classify(tool, cmd, out);
+  const status = classify(tool, out);
   const ts = new Date().toISOString();
 
   const rec: ToolResult = { call, tool, summary: summarize(text), ts, status: null };

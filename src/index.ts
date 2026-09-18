@@ -1,5 +1,5 @@
 // opencode-self-improvement: one opencode plugin bundling durable memory, the
-// 4-gate write pipeline (SPEC.md), deterministic reflection triggers T1/T2/T4,
+// 4-gate write pipeline, deterministic reflection triggers T1/T2/T4,
 // tiny-digest injection with contextual pull, and snapshot/rollback.
 import { join } from "node:path";
 import { type Plugin, tool } from "@opencode-ai/plugin";
@@ -63,7 +63,7 @@ export const SelfImprovement: Plugin = async (ctx) => {
       if (outcome.action === "collapsed") {
         return `Duplicate ignored: ${args.type}/${args.scope}`;
       }
-      return `Write blocked at GATE (${outcome.reason}). Evidence recorded for /refine review.`;
+      return `Write blocked at GATE (${outcome.reason}). Evidence recorded; inspect with memory_evidence.`;
     },
   });
 
@@ -105,7 +105,7 @@ export const SelfImprovement: Plugin = async (ctx) => {
           .map((x) => x.m);
       }
       const limit = args.limit || 20;
-      const limited = results.slice(-limit);
+      const limited = args.query ? results.slice(0, limit) : results.slice(-limit);
       if (!limited.length) return "No matching memories";
       return `Found ${results.length} (${total} total)\n\n${limited.map(formatMemory).join("\n")}`;
     },

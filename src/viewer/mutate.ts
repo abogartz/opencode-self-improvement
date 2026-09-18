@@ -1,4 +1,4 @@
-// Non-destructive viewer mutations (SPEC: human-approved branch of the gate).
+// Non-destructive viewer mutations (the human-approved branch of the write gate).
 // An EDIT snapshots the pre-mutation file, marks the old entry superseded, then
 // appends the edited entry exactly once. A DELETE snapshots the pre-mutation
 // file and removes the entry plus an audited reason. Nothing is ever destroyed:

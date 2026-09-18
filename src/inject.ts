@@ -1,6 +1,6 @@
 // Context surfaces. The system digest is TINY (≤2 lines): durable knowledge is
 // pulled on demand, not pushed wholesale. Contextual pull rides grep/glob/read
-// results (the same seam cbm-augment uses for graph nodes). Evidence is never
+// results. Evidence is never
 // injected (invariant I3).
 import { isActive, loadAll, type Memory } from "./memory.ts";
 

@@ -1,4 +1,4 @@
-// Human intervention for poisoned/stale memory (SPEC). A blocked memory is
+// Human intervention for poisoned/stale memory. A blocked memory is
 // still retained on disk (never destroyed) but is filtered out of every read
 // path: recall, the injected digest and contextual pull, and the viewer's
 // active list. Blocklist lives at <memoryRoot>/blocklist.logfmt so a recursive
