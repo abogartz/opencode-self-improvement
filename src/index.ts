@@ -1,14 +1,21 @@
 // opencode-self-improvement: one opencode plugin bundling durable memory, the
 // 4-gate write pipeline, deterministic reflection triggers T1/T2/T4,
-// tiny-digest injection with contextual pull, and snapshot/rollback.
+// tiny-digest injection with deterministic memory-first context and
+// contextual pull, and snapshot/rollback.
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { type Plugin, tool } from "@opencode-ai/plugin";
 import { evidenceDir, memoryRoot, dateStr } from "./config.ts";
 import { loadAll, isActive, markSuperseded, type Memory } from "./memory.ts";
 import { runWriteGate, type GateContext, type WriteCandidate } from "./gates.ts";
 import { pruneMemory } from "./prune.ts";
 import { listSnapshots, restoreSnapshot } from "./undo.ts";
-import { contextualPull, formatMemory, systemDigest } from "./inject.ts";
+import {
+  contextualPull,
+  formatMemory,
+  relevantKnowledge,
+  systemDigest,
+} from "./inject.ts";
 import { formatInit, runInit } from "./init.ts";
 import { ensureInitCommand } from "./command.ts";
 import { afterTool, evidenceCalls, hasGateCheck, onCompacting } from "./triggers.ts";
@@ -84,7 +91,8 @@ export const SelfImprovement: Plugin = async (ctx) => {
   });
 
   const recall = tool({
-    description: "Retrieve memories by scope, type, or search query (read path; no gate).",
+    description:
+      "Look up durable project knowledge — build/test/lint commands, decisions, patterns, preferences, blockers — BEFORE searching the repo or reading files. Use for 'how do I run X', conventions, and past decisions. By scope, type, or free-text query; with no filters it returns the most recent memories.",
     args: {
       scope: tool.schema.string().optional(),
       type: tool.schema.enum(TYPES).optional(),
@@ -228,6 +236,33 @@ export const SelfImprovement: Plugin = async (ctx) => {
     },
     "experimental.chat.system.transform": async (_input, output) => {
       await systemDigest(_input, output);
+    },
+    "chat.message": async (input, output) => {
+      try {
+        const messageID = input.messageID ?? output.message.id;
+        const id = `prt_${randomUUID()}`;
+        if (!messageID?.startsWith("msg")) {
+          console.warn("[opencode-self-improvement] chat.message: no message id, skipping injection");
+          return;
+        }
+        const text = output.parts
+          .filter((p) => p.type === "text")
+          .map((p) => p.text)
+          .join("\n");
+        const block = await relevantKnowledge(text);
+        if (!block) return;
+        output.parts.push({
+          type: "text",
+          id,
+          sessionID: input.sessionID,
+          messageID,
+          time: { start: Date.now() },
+          text: block,
+          synthetic: true,
+        });
+      } catch (err) {
+        console.error("[opencode-self-improvement] chat.message hook failed:", err);
+      }
     },
     "experimental.session.compacting": async (input) => {
       await onCompacting(input);

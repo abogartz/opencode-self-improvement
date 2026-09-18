@@ -1,7 +1,8 @@
 // Context surfaces. The system digest is TINY (≤2 lines): durable knowledge is
-// pulled on demand, not pushed wholesale. Contextual pull rides grep/glob/read
-// results. Evidence is never
-// injected (invariant I3).
+// pulled on demand, not pushed wholesale. Deterministic memory-first injection
+// rides chat.message (synthetic parts), so relevant knowledge is in the model's
+// context before it chooses any tool. Contextual pull rides grep/glob/read
+// results. Evidence is never injected (invariant I3).
 import { isActive, loadAll, type Memory } from "./memory.ts";
 
 export interface TransformOutput {
@@ -42,6 +43,22 @@ function words(text: string): string[] {
     .filter((t) => t.length > 2);
 }
 
+function scoreMemories(term: string, mems: Memory[], limit: number): Memory[] {
+  const query = new Set(words(term));
+  if (!query.size) return [];
+  return mems
+    .map((m) => {
+      const hay = new Set(words(`${m.scope} ${m.type} ${m.content}`));
+      let score = 0;
+      for (const w of query) if (hay.has(w)) score++;
+      return { m, score };
+    })
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((s) => s.m);
+}
+
 export async function systemDigest(
   _input: unknown,
   output: TransformOutput,
@@ -52,8 +69,17 @@ export async function systemDigest(
   output.system.push(
     "\n## Persistent memory (opencode-self-improvement)\n" +
       `${mems.length} durable memories; latest: ${latest}. ` +
-      "Pull related items with memory_recall; contextual pull fires on grep/glob/read.",
+      "Check memory_recall BEFORE grepping or reading, for build/test/lint commands, decisions, and conventions. Relevant memories are also auto-injected when your message matches.",
   );
+}
+
+export async function relevantKnowledge(message: string, limit = 3): Promise<string> {
+  const text = message.trim();
+  if (!text) return "";
+  const mems = (await loadAll()).filter(isActive);
+  const top = scoreMemories(text, mems, limit);
+  if (!top.length) return "";
+  return `## Relevant durable memory\n${top.map(formatMemory).join("\n")}`;
 }
 
 export async function contextualPull(input: PullInput, output: PullOutput): Promise<void> {
@@ -61,20 +87,10 @@ export async function contextualPull(input: PullInput, output: PullOutput): Prom
   if (!["grep", "glob", "read"].includes(tool)) return;
   const term = argText(input.args);
   if (!term) return;
-  const query = new Set(words(term));
   const mems = (await loadAll()).filter(isActive);
-  const scored = mems
-    .map((m) => {
-      const hay = new Set(words(`${m.scope} ${m.type} ${m.content}`));
-      let score = 0;
-      for (const w of query) if (hay.has(w)) score++;
-      return { m, score };
-    })
-    .filter((s) => s.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
-  if (!scored.length) return;
-  const block = scored.map((s) => formatMemory(s.m)).join("\n");
+  const top = scoreMemories(term, mems, 3);
+  if (!top.length) return;
+  const block = top.map(formatMemory).join("\n");
   if (typeof output.output === "string") {
     output.output += `\n## Related durable memory (pull)\n${block}`;
   }
