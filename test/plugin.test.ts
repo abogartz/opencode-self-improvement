@@ -30,6 +30,7 @@ describe("plugin wiring", () => {
         "memory_forget",
         "memory_init",
         "memory_list",
+        "memory_merge_review",
         "memory_recall",
         "memory_remember",
         "memory_undo",

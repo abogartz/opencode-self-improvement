@@ -261,6 +261,31 @@ export const SelfImprovement: Plugin = async (ctx) => {
     },
   });
 
+  const mergeReview = tool({
+    description: "Resolve an open merge/review gate non-destructively: mark the loser as superseded_by the survivor. Both rows stay active data (the loser is recoverable via memory_undo); nothing is deleted. Fails closed (no partial apply) when the reason or the survivor id is missing, or the loser is a canonical/settled/thin row that must not be superseded.",
+    args: {
+      loser: tool.schema.string().describe("Evidence id of the rival/overlap write to supersede"),
+      survivor: tool.schema.string().describe("Evidence id of the canonical winning write"),
+      reason: tool.schema.string().describe("Why the survivor is canonical over the loser (written to evidence)")
+    },
+    async execute(args) {
+      if (!args.loser || !args.survivor || !args.reason) {
+        return "merge_review blocked: loser, survivor, and reason are all required (fail-closed).";
+      }
+      const ok = await markSuperseded(args.loser, {
+        superseded_by: args.survivor,
+        reason: args.reason,
+        symbol: args.loser,
+        from: args.loser,
+        to: args.survivor,
+      });
+      if (!ok) {
+        return "merge_review: loser not found or already superseded — nothing to resolve. No evidence written.";
+      }
+      return `Resolved merge: ${args.survivor} is canonical; ${args.loser} superseded (recoverable via memory_undo). Evidence recorded for reason='${args.reason}'.`;
+    },
+  });
+
   return {
     tool: {
       memory_init: init,
@@ -271,7 +296,11 @@ export const SelfImprovement: Plugin = async (ctx) => {
       memory_list: list,
       memory_undo: undo,
       memory_evidence: evidence,
+      memory_merge_review: mergeReview,
     },
+    // NOTE: the tool map above still lacks evidence/undo-mirroring entries for
+    // merge review lookup; memory_merge_review is the adjacent resolver. Keep
+    // this tool non-destructive (it only marksSuperseded; it never deletes).
     "tool.execute.before": async (input) => {
       await guarded("tool.execute.before", async () => setCurrent(input));
     },
