@@ -1,4 +1,3 @@
-/** @jsxImportSource @opentui/solid */
 // Terminal surface for opencode-self-improvement (the CLI/TUI half of the
 // plugin). Runs in the terminal process, beside the host's OpenTUI renderer:
 // a one-line footer badge (what is in my context + is the cache healthy), a
