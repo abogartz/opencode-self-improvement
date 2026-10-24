@@ -25,11 +25,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: write # version-bump commit, tag, GitHub release
-  issues: write # comment on released issues
-  pull-requests: write # comment on released pull requests
-  id-token: write # npm Trusted Publishing (OIDC) + provenance
+permissions: {}
 
 concurrency:
   group: release
@@ -37,46 +33,61 @@ concurrency:
 
 jobs:
   release:
+    # Defence in depth: .releaserc.json's branches: ["main"] already stops
+    # semantic-release on any other branch. This also keeps a workflow_dispatch
+    # from another branch from reaching the OIDC step at all, should that
+    # config ever widen or a second publish path appear.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # No `environment:` deliberately: its name enters the OIDC token claims,
+    # and the npm trusted publisher is configured for the workflow file alone.
+    # Adding one silently breaks the next publish until npm is reconfigured.
+    permissions:
+      contents: read # checkout only; release writes use the App token below
+      id-token: write # npm Trusted Publishing (OIDC) + provenance
     steps:
-      # Short-lived (1 h) installation token for the release App — the actor
-      # the ruleset bypasses for. Secrets: SEMANTIC_RELEASE_APP_PRIVATE_KEY,
-      # variable: SEMANTIC_RELEASE_APP_ID.
-      - name: Mint release-App token
-        id: app-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ vars.SEMANTIC_RELEASE_APP_ID }}
-          private-key: ${{ secrets.SEMANTIC_RELEASE_APP_PRIVATE_KEY }}
-
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0 # semantic-release needs full history and tags
-          # Origin credentials must be the App (push needs the bypass),
-          # not GITHUB_TOKEN:
-          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       # Bun-native repo (bun.lock, no package-lock.json): the semantic-release
       # plugins are devDependencies, so the release needs an install.
-      - uses: oven-sh/setup-bun@v2
+      # Bun is pinned on purpose (Bun behaviour differs between releases, e.g.
+      # Bun.write({append:true})); bump it here and in ci.yml together.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.4.4
 
       # Provides Node + the npm CLI that semantic-release drives. Do NOT set
       # registry-url here: the .npmrc it writes conflicts with semantic-release's
       # OIDC authentication (EINVALIDNPMTOKEN).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
       - run: bun install --frozen-lockfile
 
-      # Analyze -> bump -> commit -> tag -> GitHub release -> npm publish (OIDC).
+      # Short-lived (1 h) installation token for the release App — the actor
+      # the ruleset bypasses for. Mint it only when semantic-release is ready
+      # to push. Secrets: SEMANTIC_RELEASE_APP_PRIVATE_KEY; variable:
+      # SEMANTIC_RELEASE_APP_ID.
+      - name: Mint release-App token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.SEMANTIC_RELEASE_APP_ID }}
+          private-key: ${{ secrets.SEMANTIC_RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+
+      # Analyze -> bump -> commit -> tag -> npm publish -> GitHub release.
       # The version-bump commit carries [skip ci], so it does not re-trigger this
-      # workflow. If the npm step fails, no tag or GitHub release is created.
+      # workflow. semantic-release pushes the commit and tag before npm publish;
+      # if npm fails, they remain, but no GitHub release is created.
       - run: npx semantic-release
         env:
-          # @semantic-release/git pushes through origin (App credentials from
-          # checkout); @semantic-release/github's release + PR/issue comments
-          # use this same App token. npm publishing stays OIDC — unaffected.
+          # semantic-release uses the App token for Git pushes, the GitHub
+          # release, and PR/issue comments. npm publishing stays OIDC.
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
