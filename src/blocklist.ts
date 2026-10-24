@@ -5,7 +5,7 @@
 // memory scan must never pick it up.
 import { join } from "node:path";
 import { memoryRoot } from "./config.ts";
-import { appendLog, formatLine, parseLine, readLines, writeAtomic } from "./logfmt.ts";
+import { appendLog, fileIdentity, formatLine, parseLine, readLines, writeAtomic } from "./logfmt.ts";
 import { withStoreLock, LOCK_WRITE } from "./lock.ts";
 
 const BLOCKLIST_FILENAME = "blocklist.logfmt";
@@ -59,11 +59,12 @@ export async function removeBlock(ts: string): Promise<boolean> {
     async () => {
       const store = Bun.file(file);
       if (!(await store.exists())) return false;
+      const since = await fileIdentity(file);
       const kept = (await store.text()).split("\n").filter((l) => {
         const row = parseLine(l);
         return !(row && row.ts === ts);
       });
-      await writeAtomic(file, kept.join("\n") + (kept.length ? "\n" : ""));
+      await writeAtomic(file, kept.join("\n") + (kept.length ? "\n" : ""), since);
       return true;
     },
     LOCK_WRITE,

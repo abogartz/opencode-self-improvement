@@ -13,7 +13,7 @@
 import { lstat, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { deletionsFile, snapshotDir } from "./config.ts";
-import { ensureDir, parseLine, readLines, writeAtomic } from "./logfmt.ts";
+import { ensureDir, fileIdentity, parseLine, readLines, writeAtomic } from "./logfmt.ts";
 import { withStoreLock, LOCK_RESTORE } from "./lock.ts";
 import { snapshotFiles } from "./memory.ts";
 
@@ -206,6 +206,9 @@ export async function restoreSnapshot(
   return withStoreLock(
     target,
     async () => {
+      // Identity before the first read of `target` here: everything published
+      // below derives from what this read sees (logfmt.ts handoverRename).
+      const since = await fileIdentity(target);
       const cur = Bun.file(target);
       const curLines = (await cur.exists()) ? rows(await cur.text()) : [];
       // Deliberate deletions are read inside the lock too, so a forget that
@@ -254,7 +257,7 @@ export async function restoreSnapshot(
         );
       }
       await ensureDir(memoryRootDir);
-      await writeAtomic(target, out.length ? out.join("\n") + "\n" : "");
+      await writeAtomic(target, out.length ? out.join("\n") + "\n" : "", since);
       return { target, restored: true, mode, safety, concurrentAdded, concurrentChanged, deletedOmitted };
     },
     LOCK_RESTORE,

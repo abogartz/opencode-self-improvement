@@ -1,7 +1,9 @@
 // Minimal logfmt reader/writer shared by the durable store and the evidence
 // log. Field order is preserved on write so chains are diffable.
 import { dirname } from "node:path";
-import { appendFile, mkdir, rename, unlink } from "node:fs/promises";
+import { appendFile, mkdir, rename, stat, unlink } from "node:fs/promises";
+
+const IS_WINDOWS = process.platform === "win32";
 
 export type Fields = Record<string, unknown>;
 
@@ -94,22 +96,81 @@ export async function appendLog(file: string, line: string): Promise<void> {
   await appendFile(file, next);
 }
 
+// A change-detection token for one file: any append, rewrite or replacement
+// changes it. "absent" marks a file that does not exist yet. Readers of the
+// freshness contract below take it BEFORE reading, so it pins the state the
+// published content was derived from.
+export async function fileIdentity(file: string): Promise<string> {
+  try {
+    const s = await stat(file, { bigint: true });
+    return `${s.ino}|${s.size}|${s.mtimeNs}`;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    return "absent";
+  }
+}
+
 // Publish whole-file content so no reader can observe a partial store. Recall,
 // injection and the viewer read these files without taking the lock, so the
 // handover is a same-directory rename (atomic on POSIX): a reader sees either
 // the previous file or the new one, never a truncated middle. Callers hold the
 // store lock for the whole read-modify-write.
-export async function writeAtomic(file: string, content: string): Promise<void> {
+//
+// `since` is the fileIdentity() taken before the caller read the file it is
+// deriving `content` from. With it, a Windows handover that fails on reader
+// contention can retry without risking a stale publish (see handoverRename).
+// Without it, publishing behaves exactly as it always has: one rename.
+export async function writeAtomic(file: string, content: string, since?: string): Promise<void> {
   await ensureDir(dirname(file));
   // One writer per file (the store lock), so the temp name is stable per
   // process and a crash leaves one leftover instead of one per attempt.
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     await Bun.write(tmp, content);
-    await rename(tmp, file);
+    await handoverRename(tmp, file, since);
   } catch (err) {
     await unlink(tmp).catch(() => undefined);
     throw err;
+  }
+}
+
+// POSIX renames swap a file out from under an open reader; the handover needs
+// one call, and a failure there is fatal, never contention. Windows mandatory
+// locking instead REFUSES to replace a destination any reader still holds,
+// while that handle lives. Readers of a small store file cycle their handle on
+// a microsecond scale, so that failure is usually transient and worth a retry
+// window (~2s, well inside the 5s lock budget) — but a retry alone is not safe
+// here. If an unlocked writer (a starved lock waiter runs its write anyway;
+// see lock.ts onTimeout) appends into the destination DURING the window, the
+// retried rename publishes our now-stale copy over that row — a slower way to
+// lose exactly what the immediate failure preserved. So the retry runs only
+// while the destination still matches `since`, the identity from before the
+// caller's read: match means no one moved the file and the blocker is a bare
+// reader handle, a mismatch means the write's premise is gone and it fails
+// with the original error, as the no-retry path always did. Hence also: no
+// `since`, no retry.
+async function handoverRename(tmp: string, file: string, since?: string): Promise<void> {
+  try {
+    await rename(tmp, file);
+    return;
+  } catch (err) {
+    if (!IS_WINDOWS || since === undefined) throw err;
+    const deadline = Date.now() + 2000;
+    let backoff = 1;
+    for (;;) {
+      const now = Date.now();
+      if (now >= deadline) throw err;
+      await new Promise((r) => setTimeout(r, Math.min(backoff, deadline - now)));
+      backoff = Math.min(backoff * 2, 50);
+      if ((await fileIdentity(file)) !== since) throw err; // destination moved; our copy is stale
+      try {
+        await rename(tmp, file);
+        return;
+      } catch {
+        // Still the reader's turn to block us (or a fresh one); the identity
+        // check at the top of the next pass is what distinguishes the two.
+      }
+    }
   }
 }
 

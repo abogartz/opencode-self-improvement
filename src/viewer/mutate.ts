@@ -9,7 +9,7 @@
 import { deletionsFile } from "../config.ts";
 import { addBlock, removeBlock } from "../blocklist.ts";
 import { record, chainId } from "../evidence.ts";
-import { appendLog, formatLine, parseLine, readLines, writeAtomic } from "../logfmt.ts";
+import { appendLog, fileIdentity, formatLine, parseLine, readLines, writeAtomic } from "../logfmt.ts";
 import { withStoreLock, LOCK_WRITE } from "../lock.ts";
 import {
   appendMemory,
@@ -106,6 +106,7 @@ export async function deleteMemory(input: DeleteInput): Promise<MutationResult> 
   await withStoreLock(
     target.file,
     async () => {
+      const since = await fileIdentity(target.file);
       const lines = await readLines(target.file);
       const kept = lines.filter((l) => {
         const f = parseLine(l);
@@ -113,7 +114,7 @@ export async function deleteMemory(input: DeleteInput): Promise<MutationResult> 
       });
       if (kept.length === lines.length) throw new Error(`memory line not found: ${input.ts}`);
       snapshot = await snapshotFiles([target.file]);
-      await writeAtomic(target.file, kept.join("\n") + (kept.length ? "\n" : ""));
+      await writeAtomic(target.file, kept.join("\n") + (kept.length ? "\n" : ""), since);
     },
     LOCK_WRITE,
   );

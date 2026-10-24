@@ -31,6 +31,10 @@ const STALE_MS = 10_000;
 const DEFAULT_TIMEOUT_MS = 5_000;
 const MIN_BACKOFF_MS = 1;
 const MAX_BACKOFF_MS = 25;
+// How many consecutive create-failures with a proven-absent lock file mean
+// "this filesystem is not letting us create it" rather than "we are losing a
+// race with a live holder". The wait is a fast, bounded spin, not a budget.
+const ABSENT_THROW_STRIKES = 8;
 
 export function lockFileFor(file: string): string {
   return file + LOCK_SUFFIX;
@@ -84,12 +88,29 @@ async function timed(prev: Promise<void>, ms: number): Promise<boolean> {
   return gained;
 }
 
+// The one probe that can answer "there is no holder" without itself being a
+// creation attempt: stat reports a held file happily (Windows shares metadata
+// reads with the handle owner), and ENOENT — uniquely — proves absence.
+async function lockFileAbsent(lockPath: string): Promise<boolean> {
+  try {
+    await stat(lockPath);
+    return false;
+  } catch (probe) {
+    return (probe as NodeJS.ErrnoException).code === "ENOENT";
+  }
+}
+
 async function stealIfStale(lockPath: string, now: number): Promise<boolean> {
   let age = -1;
   try {
     age = now - (await stat(lockPath)).mtimeMs;
   } catch {
-    return true; // vanished between EEXIST and stat: retry the create
+    // Age undeterminable — typically the holder finished and removed the
+    // file a moment before this stat. "Not stealable" is the safe answer:
+    // the caller backs off within the budget and the next create wins.
+    // The old "retry the create immediately" here turned a stat that keeps
+    // failing into a hot spin that never consulted the budget at all.
+    return false;
   }
   if (age < STALE_MS) return false;
   try {
@@ -112,6 +133,8 @@ async function holdFileLock<T>(
   const token = `${process.pid}-${Math.random().toString(36).slice(2)}`;
   const started = Date.now();
   let backoff = MIN_BACKOFF_MS;
+  let firstErr: unknown;
+  let absentStrikes = 0;
   for (;;) {
     try {
       const handle = await open(lockPath, "wx");
@@ -122,8 +145,23 @@ async function holdFileLock<T>(
       }
       break;
     } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== "EEXIST") throw err;
+      // Any creation failure means: wait for the current holder, whatever
+      // label it carries (POSIX EEXIST; Windows sharing violations EPERM/
+      // EACCES; or the file vanishing between this open and any later probe
+      // — the holder simply finished). Policies that trusted a label or a
+      // one-shot probe were tried and lost rows: throwing on non-EEXIST
+      // aborted writers on mislabelled contention, and throwing on a
+      // stat-probe ENOENT aborted them in the vanish race.
+      // The filesystem still gets the last word: if creation keeps failing
+      // while stat keeps proving NO lock file exists, there is no holder to
+      // wait for — our own ability to create files is what is broken, and
+      // the original error must surface instead of rotting into a timeout.
+      firstErr ??= err;
+      if (await lockFileAbsent(lockPath)) {
+        if (++absentStrikes >= ABSENT_THROW_STRIKES) throw firstErr;
+      } else {
+        absentStrikes = 0;
+      }
       if (await stealIfStale(lockPath, Date.now())) {
         opts.onEvent?.("steal", Date.now() - started);
         continue;
@@ -135,6 +173,11 @@ async function holdFileLock<T>(
             `memory store is busy: ${basename(file)} has been locked for ${Date.now() - started}ms — retry`,
           );
         }
+        // Proceeding without the lock is the designed concession to
+        // contention — but never while the lock file has been absent this
+        // whole time: on a filesystem where we cannot create it, writing
+        // "unlocked" would just mean writing unguarded.
+        if (absentStrikes > 0) throw firstErr;
         return fn();
       }
       await sleep(backoff);

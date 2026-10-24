@@ -16,8 +16,23 @@ jobs:
       - name: Lint (biome — errors fail; warnings advisory)
         run: bun run lint
 
+  # opencode runs on Windows too, and the store's filesystem assumptions
+  # (rename handover, O_EXCL lock files, dir walks) have Windows-specific
+  # failure modes that Ubuntu alone cannot see. Separate job, not a matrix on
+  # `test`: a matrix renames the check to `test (ubuntu-latest)`/`test
+  # (windows-latest)`, and branch rulesets pin required checks by exact name.
+  # `test-windows` is informational — it reports, it cannot gate merges.
   test:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Tests
+        run: bun run test
+
+  test-windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

@@ -277,7 +277,15 @@ async function walkSources(absDir: string, relDir: string, out: string[]): Promi
   } catch {
     // Directory vanished mid-walk: keep what was collected.
   } finally {
-    dh.close().catch(() => {});
+    // Close by awaiting, never by chaining off the return value: Bun 1.3.10
+    // returns undefined from DirHandle.close() (there the old `.catch()` chain
+    // threw a TypeError that killed the walk), 1.4.4 returns a Promise, and
+    // awaiting serves both — the optional call covers runtimes without it.
+    try {
+      await dh.close?.();
+    } catch {
+      // The walk is done: a handle that refuses to close is GC's problem.
+    }
   }
 }
 
