@@ -4,7 +4,7 @@
 // 140 rows into the developer's real memory store.)
 import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname } from "node:path";
+import { dirname, sep } from "node:path";
 
 export function requireTempPath(path: string, role: string): void {
   let p = path;
@@ -16,7 +16,7 @@ export function requireTempPath(path: string, role: string): void {
     }
     p = up;
   }
-  if (!realpathSync(p).startsWith(realpathSync(tmpdir()) + "/")) {
+  if (!realpathSync(p).startsWith(realpathSync(tmpdir()) + sep)) {
     console.error(`${role}: refusing to run against a non-temporary store path: ${path}`);
     process.exit(2);
   }
