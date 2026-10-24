@@ -8,7 +8,7 @@
 // per-session cooldown bounds model calls; and setup's cleanup aborts the
 // subscription. Hermetic: temp OPENCODE_MEMORY_DIR / OPENCODE_COMMANDS_DIR.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { dateStr, evidenceDir, memoryRoot } from "../src/config.ts";
@@ -40,6 +40,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 function seed(type: string, scope: string, content: string): void {

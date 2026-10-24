@@ -11,7 +11,7 @@
 // Hermetic: OPENCODE_MEMORY_DIR points at a temp dir and the "live" source tree
 // is a throwaway, so nothing here touches this repo or the real memory store.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { dateStr, evidenceDir, memoryRoot } from "../src/config.ts";
@@ -33,6 +33,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 type AnyHook = (input: unknown, output: unknown) => Promise<void>;

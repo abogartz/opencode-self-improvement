@@ -12,6 +12,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { connect } from "node:net";
@@ -38,6 +39,7 @@ beforeEach(async () => {
 afterEach(async () => {
   vm.server.stop();
   delete process.env.OPENCODE_MEMORY_DIR;
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 function seed(type: string, scope: string, content: string, ts = new Date().toISOString()): string {

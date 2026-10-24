@@ -2,7 +2,7 @@
 // tasks inside one process; a dead holder is recovered by age; waiting past the
 // timeout either fails closed or proceeds; and a holder whose lock was taken
 // over never deletes the new one.
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,8 +15,10 @@ function tmp(): string {
   roots.push(root);
   return root;
 }
-afterAll(() => {
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
+afterEach(() => {
+  for (const r of roots.splice(0)) {
+    rmSync(r, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  }
 });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

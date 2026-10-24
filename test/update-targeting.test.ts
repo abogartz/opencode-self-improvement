@@ -9,7 +9,7 @@
 // Second contract: memory_merge_review declares a survivor canonical, so the
 // survivor must come out recallable — clearing a supersession it already carried.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dateStr, memoryRoot, snapshotDir } from "../src/config.ts";
@@ -46,6 +46,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 // Deliberately token-disparate so GATE-3 overlap/collapse never fires and each

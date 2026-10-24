@@ -2,12 +2,14 @@
 // backslashes or quotes must come back intact and must never split into a
 // second record.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { memoryRoot } from "../src/config.ts";
 import { appendLog, formatLine, parseLine, readLines } from "../src/logfmt.ts";
 import { appendMemory, loadAll, markSuperseded } from "../src/memory.ts";
+
+let tmpDir: string;
 
 describe("formatLine/parseLine round-trip", () => {
   const values = [
@@ -65,11 +67,13 @@ describe("legacy rows in the store", () => {
   let prev: string | undefined;
   beforeEach(() => {
     prev = process.env.OPENCODE_MEMORY_DIR;
-    process.env.OPENCODE_MEMORY_DIR = join(mkdtempSync(join(tmpdir(), "osi-logfmt-")), "memory");
+    tmpDir = mkdtempSync(join(tmpdir(), "osi-logfmt-"));
+    process.env.OPENCODE_MEMORY_DIR = join(tmpDir, "memory");
   });
   afterEach(() => {
     if (prev === undefined) delete process.env.OPENCODE_MEMORY_DIR;
     else process.env.OPENCODE_MEMORY_DIR = prev;
+    rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   test("superseding a legacy row rewrites it in the current format without changing it", async () => {
@@ -94,11 +98,13 @@ describe("store rows cannot be forged through content", () => {
   let prev: string | undefined;
   beforeEach(() => {
     prev = process.env.OPENCODE_MEMORY_DIR;
-    process.env.OPENCODE_MEMORY_DIR = join(mkdtempSync(join(tmpdir(), "osi-logfmt-")), "memory");
+    tmpDir = mkdtempSync(join(tmpdir(), "osi-logfmt-"));
+    process.env.OPENCODE_MEMORY_DIR = join(tmpDir, "memory");
   });
   afterEach(() => {
     if (prev === undefined) delete process.env.OPENCODE_MEMORY_DIR;
     else process.env.OPENCODE_MEMORY_DIR = prev;
+    rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   test("a newline plus fields in content stays one memory", async () => {

@@ -3,7 +3,7 @@
 // the graph step degrades to `unavailable` without spawning anything real.
 // Scope = directory basename ("repo"), matching the repo-name convention.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin } from "./harness.ts";
@@ -13,10 +13,11 @@ import type { InitSummary } from "../src/init.ts";
 
 let memoryDir: string;
 let fixture: string;
+let root: string;
 let init: { execute(args: { force?: boolean; mode?: string }): Promise<string> };
 
 beforeEach(async () => {
-  const root = mkdtempSync(join(tmpdir(), "osi-init-"));
+  root = mkdtempSync(join(tmpdir(), "osi-init-"));
   memoryDir = join(root, "memory");
   process.env.OPENCODE_MEMORY_DIR = memoryDir;
   process.env.OPENCODE_COMMANDS_DIR = join(root, "commands");
@@ -34,6 +35,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   delete process.env.OPENCODE_CBM_BIN;
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 describe("memory_init", () => {

@@ -1,8 +1,8 @@
 // Smoke test: the V2 plugin's setup registers the full surface (tools, tool &
 // session hooks) and the memory-first prompt injection works. This is what
 // "install from scratch as an opencode extension" depends on.
-import { beforeEach, describe, expect, test } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pluginDefault, { SelfImprovement } from "../index.ts";
@@ -11,12 +11,18 @@ import { formatLine } from "../src/logfmt.ts";
 import { resetState } from "../src/state.ts";
 import { loadPlugin } from "./harness.ts";
 
+let root: string;
+
 beforeEach(() => {
-  const root = mkdtempSync(join(tmpdir(), "osi-plugin-"));
+  root = mkdtempSync(join(tmpdir(), "osi-plugin-"));
   process.env.OPENCODE_MEMORY_DIR = join(root, "memory");
   process.env.OPENCODE_COMMANDS_DIR = join(root, "commands");
   mkdirSync(join(root, "repo"), { recursive: true });
   resetState();
+});
+
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 const dir = () => join(process.env.OPENCODE_MEMORY_DIR!, "..", "repo");

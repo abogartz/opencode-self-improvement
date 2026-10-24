@@ -6,7 +6,7 @@
 // whole-line boundaries. Hermetic: temp OPENCODE_MEMORY_DIR /
 // OPENCODE_COMMANDS_DIR, nothing touches the real store.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { dateStr, evidenceDir, frontierBudget, injectBudget, memoryRoot } from "../src/config.ts";
@@ -36,6 +36,7 @@ afterEach(() => {
   delete process.env.OPENCODE_COMMANDS_DIR;
   delete process.env.OPENCODE_MEMORY_INJECT_BUDGET;
   delete process.env.OPENCODE_MEMORY_FRONTIER_BUDGET;
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 function seed(type: string, scope: string, content: string): string {

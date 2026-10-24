@@ -1,20 +1,25 @@
 // Command self-install: the plugin mirrors /repo-init into opencode's commands
 // dir on load — no terminal copy step. Idempotent (never overwrites edits).
-import { beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin } from "./harness.ts";
 import { resetState } from "../src/state.ts";
 
 let commandsDirPath: string;
+let root: string;
 
 beforeEach(() => {
-  const root = mkdtempSync(join(tmpdir(), "osi-cmd-"));
+  root = mkdtempSync(join(tmpdir(), "osi-cmd-"));
   process.env.OPENCODE_MEMORY_DIR = join(root, "memory");
   process.env.OPENCODE_COMMANDS_DIR = join(root, "commands");
   commandsDirPath = process.env.OPENCODE_COMMANDS_DIR;
   resetState();
+});
+
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 describe("ensureInitCommand", () => {

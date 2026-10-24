@@ -4,7 +4,7 @@
 // (bare names, absolute, ~, $VAR, URLs, `..`) are trusted as before and never
 // produce a block.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkablePathRefs, gate1 } from "../src/resolver.ts";
@@ -68,6 +68,10 @@ describe("gate1 — existence check against liveRoot", () => {
     mkdirSync(join(liveRoot, ".git"), { recursive: true });
   });
 
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
   const run = (content: string) =>
     gate1({ content, scope: "demo", liveRoot, scopeMemories: [] });
 
@@ -117,6 +121,7 @@ describe("runWriteGate — ref_path_missing block", () => {
 
   afterEach(() => {
     delete process.env.OPENCODE_MEMORY_DIR;
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   const ctx = (): GateContext => ({

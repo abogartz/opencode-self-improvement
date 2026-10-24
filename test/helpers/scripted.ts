@@ -11,7 +11,7 @@
 // that file covers WINDOW determinism (interleavings inside one operation,
 // where only real processes plus rewrite windows are honest).
 import { expect } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { dateStr, memoryRoot, snapshotDir } from "../../src/config.ts";
@@ -234,6 +234,7 @@ export async function startScripted(): Promise<Scripted> {
 			vm.server.stop();
 			await p.cleanup();
 			delete process.env.OPENCODE_MEMORY_DIR;
+			rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 		},
 	};
 }

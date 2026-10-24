@@ -41,6 +41,7 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -73,6 +74,7 @@ beforeEach(async () => {
 afterEach(() => {
 	vm.server.stop();
 	delete process.env.OPENCODE_MEMORY_DIR;
+	rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 const store = () => join(memoryRoot(), `${dateStr()}.logfmt`);
