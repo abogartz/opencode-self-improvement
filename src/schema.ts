@@ -132,6 +132,17 @@ export const MergeReviewArgs = z.object({
   reason: z.string().describe("Why the survivor is canonical over the loser (written to evidence)"),
 });
 
+export const ConsolidateArgs = z.object({
+  scope: z.string().describe("Only consider rows in this scope").optional(),
+  jaccard: z
+    .number()
+    .describe("Similarity floor for 'same statement' (default 0.55)")
+    .min(0.2)
+    .max(0.95)
+    .optional(),
+  limit: z.number().describe("Maximum proposals to report (default 10)").min(1).max(50).optional(),
+});
+
 export const ExportArgs = z.object({
   scope: z.string().describe("Only export memories in this exact scope").optional(),
   file: z.string().describe("Destination path (default: <memory-root>/exports/)").optional(),

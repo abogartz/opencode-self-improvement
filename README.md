@@ -240,6 +240,38 @@ STORE
   Sessions idle for an hour produce an hour-old capture; now you can see it
   instead of guessing.
 
+## Consolidation that has to earn its merge
+
+Stores accumulate near-duplicates: the same fact written three times, weeks
+apart, in slightly different words. `memory_consolidate` finds them and proposes
+a merge — and it is built to say **no** more often than to say yes:
+
+- **Deterministic merge.** The canonical row is the survivor's prose *verbatim*,
+  plus the absorbed rows' aliases as keywords. No model rewrites anything: a
+  rewrite cannot be diffed, audited, or proven to preserve meaning, and this
+  plugin ships no model.
+- **Proven reads, per cluster.** Every read the use ledger recorded for that
+  cluster is replayed against the merged store. A merge is proposed only when
+  the canonical row catches at least as many of the cluster's own reads as the
+  best single member did alone. A cluster with no recorded reads is reported as
+  *unmeasured* and never merged on resemblance.
+- **Proposals, not writes.** The tool writes nothing. It prints the exact
+  `memory_merge_review` call that resolves each proposal; resolving is
+  supersede-not-delete, so absorbed rows stay recoverable.
+- **The most recently used member is never a loser.**
+
+On the shipped eval dataset the pass takes 200 rows to 52 with
+**R@3 52 → 53 and R@1 52 → 50**, and store-wide injected characters 25 945c →
+6 933c (two queries out of 105 get a block up to 48 characters bigger, because a
+canonical row inherits aliases and wins a slot it used to lose). That trade is
+asserted in CI, not assumed: `test/consolidate-bench.test.ts` bounds both the
+regression and the budget swap.
+
+The ticket carried a HOLD pending "a month of hits data", on the reasoning that
+consolidation is fragile and may not earn its cost. Measurement answers that
+better than a calendar does — so the harness measures it, per cluster, on every
+run.
+
 ## Quick start
 
 1. Add the plugin to your Opencode config (see install below) and restart Opencode.

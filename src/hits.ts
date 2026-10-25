@@ -20,6 +20,7 @@ import { appendLog, bracketList, formatLine, parseLine, readLines, writeAtomic }
 import type { UseSignals } from "./inject.ts";
 import { withStoreLock, LOCK_WRITE } from "./lock.ts";
 import type { Memory } from "./memory.ts";
+import type { ReadSet } from "./consolidate.ts";
 
 export type HitSource = "inject" | "pull" | "recall";
 
@@ -168,6 +169,24 @@ function parseList(value: string): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/**
+ * Every read the ledger recorded, in file order: the terms used and the rows it
+ * credited. This is the corpus consolidation (#45) replays — "would this merge
+ * have lost a read that actually happened?" is only answerable against real
+ * reads, and a per-row aggregate has already thrown the grouping away.
+ */
+export async function readReads(): Promise<ReadSet[]> {
+  const out: ReadSet[] = [];
+  for (const line of await readLines(hitsFile())) {
+    const f = parseLine(line);
+    if (!f || f.ev !== "memory_used") continue;
+    const rows = typeof f.mem === "string" ? parseList(f.mem) : [];
+    const terms = typeof f.terms === "string" ? parseList(f.terms) : [];
+    if (rows.length) out.push({ terms, rows });
+  }
+  return out;
 }
 
 /** Rows the ledger has NEVER seen used, plus the honest since-qualifier. */

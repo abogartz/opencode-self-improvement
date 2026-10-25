@@ -37,6 +37,7 @@ describe("plugin wiring (OpenCode V2)", () => {
 
     expect(Object.keys(loaded.tools).sort()).toEqual(
       [
+        "memory_consolidate",
         "memory_decay",
         "memory_evidence",
         "memory_export",

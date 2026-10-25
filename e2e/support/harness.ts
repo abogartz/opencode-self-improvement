@@ -12,6 +12,7 @@ export const REPO = join(import.meta.dir, "..", "..");
 
 // Every tool the plugin registers; a load failure drops one or more.
 export const MEMORY_TOOLS = [
+  "memory_consolidate",
   "memory_decay",
   "memory_evidence",
   "memory_export",

@@ -179,6 +179,21 @@ const EXPECTED_WIRE = {
     required: ["file"],
     additionalProperties: false,
   },
+  memory_consolidate: {
+    type: "object",
+    properties: {
+      scope: { type: "string", description: "Only consider rows in this scope" },
+      jaccard: {
+        type: "number",
+        minimum: 0.2,
+        maximum: 0.95,
+        description: "Similarity floor for 'same statement' (default 0.55)",
+      },
+      limit: { type: "number", minimum: 1, maximum: 50, description: "Maximum proposals to report (default 10)" },
+    },
+    required: [],
+    additionalProperties: false,
+  },
   memory_decay: {
     type: "object",
     properties: {
@@ -210,7 +225,7 @@ afterEach(() => {
 const dayFile = () => join(process.env.OPENCODE_MEMORY_DIR!, `${new Date().toISOString().split("T")[0]}.logfmt`);
 
 describe("wire contract — zod generates the exact pre-zod JSON Schema", () => {
-  test("all 13 registered tool inputs deep-equal the capture from main", async () => {
+  test("all 14 registered tool inputs deep-equal the capture from main", async () => {
     const { tools } = await loadPlugin(root);
     expect(Object.keys(tools).sort()).toEqual(Object.keys(EXPECTED_WIRE).sort());
     for (const [name, expected] of Object.entries(EXPECTED_WIRE)) {

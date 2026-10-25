@@ -31,6 +31,8 @@ import { exportMemories, findStaleOpen, importMemories } from "./portable.ts";
 import { listSnapshots, restoreSnapshot } from "./undo.ts";
 import { SESSION_CAP, SessionLru } from "./sessions.ts";
 import { record, recordCaptureLag } from "./evidence.ts";
+import { proposeConsolidations, renderProposals } from "./consolidate.ts";
+import { readReads } from "./hits.ts";
 import {
   capToBudget,
   compactionAnchor,
@@ -90,6 +92,7 @@ import {
   ForgetArgs,
   ImportArgs,
   InitArgs,
+  ConsolidateArgs,
   MergeReviewArgs,
   RecallArgs,
   RememberArgs,
@@ -329,6 +332,31 @@ const impl = {
               outcome.hint ?? "Evidence recorded; inspect with memory_evidence."
             }`,
           };
+        },
+      }));
+
+      editor.add(validated(ConsolidateArgs, {
+        name: "memory_consolidate",
+        description:
+          "Propose consolidations of near-duplicate settled rows — read-only, nothing is written. Clusters same-scope same-type rows by jaccard, picks the most recently used member as canonical (#42's rule: the row retrieval keeps landing on), and proposes it ONLY when replaying the cluster's own logged reads proves the merged row catches at least as many reads as the best single member did. A cluster with no recorded reads is reported as unmeasured, never merged on resemblance. Resolve a proposal with memory_merge_review; absorbed rows stay recoverable. The merge is deterministic — the canonical row is the survivor's prose plus the absorbed rows' aliases — because this plugin ships no model and a rewritten row cannot be diffed or audited.",
+        options: direct,
+        async execute(args): Promise<{ content: string }> {
+          const all = (await loadAll()).filter(isActive).filter(isVisibleHere);
+          const rows = args.scope ? all.filter((m) => m.scope === args.scope) : all;
+          const ledger = await readLedger();
+          const use = ledger.byRow;
+          const reads = await readReads();
+          const report = proposeConsolidations(rows, use, reads, {
+            ...(args.jaccard !== undefined ? { jaccard: args.jaccard } : {}),
+          });
+          const shown = report.plans.slice(0, args.limit ?? 10);
+          const out = renderProposals({ ...report, plans: shown });
+          await record(
+            "consolidate_propose",
+            { clusters: shown.length, rows: report.rowsBefore, would_drop: report.rowsBefore - report.rowsAfter },
+            false,
+          );
+          return { content: out };
         },
       }));
 
