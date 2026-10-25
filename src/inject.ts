@@ -208,7 +208,9 @@ function useBoost(a: Memory | undefined, use?: UseSignals): number {
 // Date.parse only while the FORMAT agrees: a legacy second-precision stamp
 // ("…:01Z") and a millisecond stamp ("…:01.000Z") for the same instant order
 // wrong as strings, which would silently mis-rank the recency tie-break.
-function cmpTs(a: string, b: string): number {
+// Exported for consolidate.ts — cluster ordering must not disagree with the
+// ranking it is merging.
+export function cmpTs(a: string, b: string): number {
   const na = Date.parse(a);
   const nb = Date.parse(b);
   if (!Number.isNaN(na) && !Number.isNaN(nb)) return na < nb ? -1 : na > nb ? 1 : 0;

@@ -27,7 +27,7 @@
 //   4. The most recently used member is never a loser (#42's rule, inherited).
 import type { Memory } from "./memory.ts";
 import type { UseSignal } from "./hits.ts";
-import { formatMemory, scoreMemories, words } from "./inject.ts";
+import { cmpTs, formatMemory, scoreMemories, words } from "./inject.ts";
 
 /** Default jaccard floor for "these two rows are the same statement". */
 export const DEFAULT_JACCARD = 0.55;
@@ -75,7 +75,7 @@ export function clustersFor(rows: Memory[], opts: ClusterOptions = {}): Memory[]
   const maxMembers = opts.maxMembers ?? 6;
   const pool = rows
     .filter((m) => !m.superseded_by && m.status !== "open" && m.content.trim())
-    .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+    .sort((a, b) => cmpTs(a.ts, b.ts));
 
   const parent = pool.map((_, i) => i);
   const find = (i: number): number => {
@@ -110,7 +110,7 @@ export function clustersFor(rows: Memory[], opts: ClusterOptions = {}): Memory[]
   });
   return [...groups.values()]
     .filter((g) => g.length >= minMembers && g.length <= maxMembers)
-    .sort((a, b) => (a[0]!.ts < b[0]!.ts ? -1 : 1));
+    .sort((a, b) => cmpTs(a[0]!.ts, b[0]!.ts));
 }
 
 /**
@@ -124,7 +124,7 @@ export function survivorFor(cluster: Memory[], use?: Map<string, UseSignal>): Me
     const la = use?.get(a.ts)?.last ?? "";
     const lb = use?.get(b.ts)?.last ?? "";
     if (la !== lb) return la < lb ? 1 : -1;
-    return a.ts < b.ts ? 1 : -1;
+    return cmpTs(b.ts, a.ts);
   })[0]!;
 }
 

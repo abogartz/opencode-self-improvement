@@ -88,6 +88,16 @@ describe("canonical row selection", () => {
     expect(survivorFor([older, newer], new Map())).toBe(newer);
   });
 
+  test("survivors are picked by instant, not by the format of the stamp", () => {
+    // A legacy second-precision stamp used to glyph-sort ABOVE a millisecond
+    // stamp from the same second plus change — "…:00Z" > "…:00.500Z" as
+    // strings, though .500 is strictly newer. Recency compares instants.
+    const legacy = mem({ content: A, ts: "2026-05-01T10:00:00Z" });
+    const millis = mem({ content: B, ts: "2026-05-01T10:00:00.500Z" });
+    expect(survivorFor([legacy, millis], new Map())).toBe(millis);
+    expect(survivorFor([millis, legacy], new Map())).toBe(millis);
+  });
+
   test("the merge is deterministic prose plus inherited aliases, never a rewrite", () => {
     // The newer row is canonical with an empty ledger, so the canonical content
     // must be that row's sentence byte-for-byte — no model rewrote anything.
