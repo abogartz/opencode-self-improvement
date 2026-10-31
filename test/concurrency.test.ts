@@ -194,14 +194,31 @@ describe("two processes sharing one store", () => {
 
   test("a reader process always parses a complete file", async () => {
     await seed(200);
+    const originals = new Set(await rawLines());
+    const completeChild = /^ts=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z type=learning scope=stress content="child row (\d+) (\d+)"$/;
     const runs = Promise.all([spawn(50, []), spawn(50, []), spawn(50, [])]);
     let partial = 0;
     for (let i = 0; i < 300; i++) {
       const lines = await rawLines();
-      if (lines.some((l) => !l.startsWith("ts=") || !l.includes(" content="))) partial++;
+      if (lines.some((l) => !originals.has(l) && !completeChild.test(l))) partial++;
     }
-    await runs;
+    expect((await runs).filter((run) => run.code !== 0)).toEqual([]);
     expect(partial).toBe(0);
-    expect(await rawLines()).toHaveLength(350);
+    const final = await rawLines();
+    expect(final).toHaveLength(350);
+    expect(final.filter((line) => originals.has(line))).toHaveLength(200);
+    const byWriter = new Map<string, Set<number>>();
+    for (const line of final.filter((line) => !originals.has(line))) {
+      const match = completeChild.exec(line);
+      expect(match).not.toBeNull();
+      if (!match) continue;
+      const rows = byWriter.get(match[2]) ?? new Set<number>();
+      rows.add(Number(match[1]));
+      byWriter.set(match[2], rows);
+    }
+    expect(byWriter.size).toBe(3);
+    for (const rows of byWriter.values()) {
+      expect([...rows].sort((a, b) => a - b)).toEqual(Array.from({ length: 50 }, (_, i) => i));
+    }
   });
 });
