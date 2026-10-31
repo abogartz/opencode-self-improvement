@@ -1,0 +1,25 @@
+{
+  "baselineSha": "bf9f4d233064c0594834c44d72648ac532ff13e8",
+  "candidate": "Same base plus the src/memory.ts daily-memory atomic publication change in this PR.",
+  "runtime": "Bun 1.4.4 on Windows and Ubuntu 24.04 WSL (ext4); one physical host.",
+  "command": "bun bench/append-cost-198.ts <absolute-source-checkout> <size-MiB> <baseline-or-candidate> <round>",
+  "setup": "Install locked dependencies in each checkout. Use the candidate benchmark script for both source roots. Each invocation creates and cleans its own synthetic store.",
+  "sizesMiB": [
+    0.1,
+    1,
+    10,
+    50
+  ],
+  "rounds": 3,
+  "order": "For each round and size, baseline then candidate in rounds 1 and 3; candidate then baseline in round 2. Fresh process for every invocation.",
+  "samples": "12 sequential appends per invocation; discard first 2 as warmups. Pool remaining 10 across three rounds: 30 samples per mode/size/platform.",
+  "aggregation": "Sort latencyMs ascending; median is average of positions 15 and 16; p95 is nearest rank ceil(0.95*30), position 29; max is position 30.",
+  "assertions": "Original byte prefix unchanged and parsed row count equals seedRows + 12 in every invocation.",
+  "limitations": [
+    "Synthetic warm-cache single-day-file workload, roughly 1 KiB seed rows.",
+    "Not independent machines or disks; no cold-cache, live-host, durability, or sustained-throughput claim.",
+    "Disk bytes written were not instrumented. Whole-file write amplification follows from implementation.",
+    "Small sample tails are noisy; raw measurements are retained.",
+    "Daily-memory publication only; other append-only logs remain outside the change and issue 198 stays open."
+  ]
+}
