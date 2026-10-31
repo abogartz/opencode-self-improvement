@@ -298,7 +298,11 @@ describe("a snapshot restore while other sessions are writing", () => {
 			`${lost.length} of ${reported} appended rows are in neither the store nor any snapshot: ${lost.slice(0, 5).join(", ")}`,
 		).toBe(0);
 		expect(reported).toBe(100);
-	});
+		// Process startup alone has a 20s readiness bound; eight real restores
+		// and child completion must also fit on a shared Windows runner. This
+		// is a conservation test, not a 5s latency contract. Keep every row and
+		// child-exit assertion above; bound the whole scenario separately.
+	}, 30_000);
 });
 
 describe("two sessions rewriting one day file", () => {
