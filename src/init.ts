@@ -232,7 +232,7 @@ export async function runInit(args: InitArgs): Promise<InitSummary> {
 
   const prior = await initStamp(scope, args.sessionID, reader);
   if (prior && !force && prior.head === head) {
-    await record("init_skip", { scope, head, since: prior.ts }, false);
+    await record("init_skip", { scope, head, since: prior.ts }, false, args.sessionID, evidenceContext);
     return {
       scope,
       root,
@@ -247,7 +247,7 @@ export async function runInit(args: InitArgs): Promise<InitSummary> {
     };
   }
 
-  await record("init_start", { scope, head, force, mode }, false);
+  await record("init_start", { scope, head, force, mode }, false, args.sessionID, evidenceContext);
 
   const graph = await ensureGraph(root, mode, force);
   const scripts = await detectScripts(root);
@@ -298,6 +298,8 @@ export async function runInit(args: InitArgs): Promise<InitSummary> {
       stamp: stampTs ?? "-",
     },
     false,
+    args.sessionID,
+    evidenceContext,
   );
 
   return {

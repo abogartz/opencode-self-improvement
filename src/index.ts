@@ -1543,15 +1543,15 @@ const impl = {
           // no-op there). SYNC only: a lookup call here would break the
           // zero-token promise of the capture tests.
           bindSessionProvisional(sid, instanceDir);
+          const captureGate = gateContext(sid);
           // #152: an instance with no workspace cannot say which repository the
           // mined rows belong to, and rows with no owner are exactly what the
           // store refuses. Skip BEFORE the model call — no tokens spent on a
           // capture that cannot be stored — and leave the reason in evidence.
           if (!writeTarget(sid).ok) {
-            await record("auto_capture_refused", { session: sid, trigger }, true, sid);
+            await record("auto_capture_refused", { session: sid, trigger }, true, sid, captureGate.evidenceContext);
             return;
           }
-          const captureGate = gateContext(sid);
           let transcript = seeded;
           let msgs = seededMsgs;
           if (transcript.length < 200) {
@@ -1595,7 +1595,7 @@ const impl = {
               await record(durable.length ? "auto_capture_partial" : "auto_capture_refused", {
                 session: sid, trigger, type: c.type, scope: redactSecrets(c.scope),
                 reason: String(err), retired: durable.join(",") || undefined,
-              }, false, sid);
+              }, false, sid, captureGate.evidenceContext);
               continue;
             }
             await record(
@@ -1615,9 +1615,11 @@ const impl = {
                 audit_error: outcome.evidenceError,
               },
               false,
+              sid,
+              captureGate.evidenceContext,
             );
           }
-          await recordCaptureLag(sid, lagMs, candidates.length ? "candidates" : "empty");
+          await recordCaptureLag(sid, lagMs, candidates.length ? "candidates" : "empty", captureGate.evidenceContext);
         }
 
         void (async () => {

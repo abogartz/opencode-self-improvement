@@ -106,7 +106,10 @@ export async function record(
   const line = formatLine({
     ev,
     ts: new Date().toISOString(),
-    ...(includeContext ? { sid, call } : {}),
+    // A captured unresolved owner still needs a privacy label: without sid or
+    // repo, evidenceVisibleTo treats a line as legacy/global. Suppress call
+    // metadata as requested, but never turn an explicit private owner global.
+    ...(includeContext ? { sid, call } : context && !scope && sid && sid !== "?" ? { sid } : {}),
     ...(scope ? { repo: scope.key, repoPath: scope.path } : {}),
     ...scrubFields(fields),
   });
@@ -135,6 +138,7 @@ export async function recordCaptureLag(
   session: string,
   lagMs: number | null,
   outcome: string,
+  context?: EvidenceContext,
 ): Promise<void> {
   await record(
     "capture_lag",
@@ -144,6 +148,8 @@ export async function recordCaptureLag(
       outcome,
     },
     false,
+    session,
+    context,
   );
 }
 
