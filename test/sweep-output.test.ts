@@ -20,6 +20,15 @@ const bailout = (reason: string) => `[acl-fixture] ${JSON.stringify({ event: "no
 const runOutput = ["test/lock.test.ts:", `(pass) ${aclTitle} [1ms]`,
   "test/other.test.ts:", "(pass) unrelated test [2ms]", " 2 pass", " 0 fail", " 0 skip"].join("\n");
 
+test("ACL accounting identifier stays tied to the real fixture declarations", async () => {
+  // The accounting regressions below pin ACL_TEST to aclId; pin that ID to
+  // the actual source too, even on hosts where the Windows fixture is skipped.
+  const [file, suite, title] = aclId.split(" > ");
+  const source = await Bun.file(new URL(file, import.meta.url)).text();
+  expect(source).toContain(`("${suite}", () => {`);
+  expect(source).toContain(`test("${title}", async () => {`);
+});
+
 test.each(["acl-deny-failed", "denial-not-effective"])("ACL %s is a capability skip even when stdout is separate", (reason) => {
   // Logging may be in stdout, before all stderr test headers or after them.
   for (const output of [`${bailout(reason)}\n${runOutput}`, `${runOutput}\n${bailout(reason)}\n${bailout(reason)}`]) {
