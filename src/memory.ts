@@ -23,6 +23,7 @@ import { blockedTs } from "./blocklist.ts";
 import { tombstoneMany } from "./tombstones.ts";
 import { containsSecret, redactSecrets } from "./secrets.ts";
 import { flattenMemoryText } from "./sanitize.ts";
+import { isQuarantined, QUARANTINE_TAG, quarantineReasons } from "./quarantine.ts";
 
 export type MemoryStatus = "open" | "settled";
 
@@ -684,6 +685,29 @@ export async function prune(
 
 export function isActive(m: Memory): boolean {
   return !m.superseded_by;
+}
+
+// Quarantine remains durable and reviewable; only model-facing reads withhold it.
+export function isInjectable(m: Memory): boolean {
+  return isActive(m) && !isQuarantined(m);
+}
+
+// Human viewer action only. Preserve identity, origin, and all non-quarantine
+// metadata; stampRow snapshots and atomically publishes under the store lock.
+export async function releaseQuarantine(ts: string): Promise<"released" | "not_found" | "not_quarantined"> {
+  for (const file of await memoryFiles()) {
+    const result = await stampRow(file, ts, (fields) => {
+      const tags = typeof fields.tags === "string" ? fields.tags.split(",") : [];
+      if (!tags.includes(QUARANTINE_TAG)) return null;
+      const scanTags = new Set([QUARANTINE_TAG, ...quarantineReasons({ tags }).map((id) => `quarantine:${id}`)]);
+      const kept = tags.filter((tag) => !scanTags.has(tag));
+      if (kept.length) fields.tags = kept.join(",");
+      else delete fields.tags;
+      return formatLine(fields);
+    });
+    if (result !== null) return result ? "released" : "not_quarantined";
+  }
+  return "not_found";
 }
 
 // --- repo visibility ---------------------------------------------------------

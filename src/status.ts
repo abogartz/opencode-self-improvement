@@ -465,9 +465,17 @@ export function renderMemoryReport(input: {
   status: StatusPayload | null;
   store: StoreCounts;
   blocked: BlockedRow[];
+  quarantined?: { ts: string; patterns: string[] }[];
 }): string {
   const { status, store, blocked } = input;
   const out: string[] = ["MEMORY STATUS", ""];
+  if (input.quarantined?.length) {
+    out.push("QUARANTINE", `  ${input.quarantined.length} rows withheld from recall and injection; review/release in the memory viewer.`);
+    for (const row of input.quarantined.slice(0, 20)) {
+      out.push(`  ${row.ts}  ${row.patterns.join(", ") || "marked for review"}`);
+    }
+    out.push("");
+  }
 
   if (!status) {
     out.push(

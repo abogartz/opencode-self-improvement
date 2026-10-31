@@ -557,7 +557,7 @@ describe("poisoned row end-to-end — import cannot forge instructions", () => {
     "the deploy gate needs a manual approval step before prod ships",
   ].join("\n");
 
-  test("an instruction-shaped imported row is framed, collapsed to one line, provenance-tagged", async () => {
+  test("an instruction-shaped import is quarantined; explicit release retains framing and provenance", async () => {
     const loaded = await loadPlugin(root);
     setRepoScope(null);
     // Ground the session so the gate promotes it on engagement — the row must
@@ -586,7 +586,15 @@ describe("poisoned row end-to-end — import cannot forge instructions", () => {
 
     const rows = (await loadAll()).filter(isActive);
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.tags ?? []).toContain("import");
+    const imported = rows[0];
+    if (!imported) throw new Error("expected the promoted import row");
+    expect(imported.tags ?? []).toContain("import");
+    expect(imported.tags ?? []).toContain("quarantine");
+    expect(await relevantKnowledge("does the deploy gate need manual approval before prod ships", 5)).toBe("");
+    // Keep the original framing assertions after explicit human approval:
+    // releasing quarantine must not remove the other defenses.
+    const { releaseQuarantinedMemory } = await import("../src/viewer/mutate.ts");
+    expect((await releaseQuarantinedMemory(imported.ts, "reviewed example")).released).toBe(true);
 
     const block = await relevantKnowledge("does the deploy gate need manual approval before prod ships", 5);
     // 1. Framing: the block declares itself reference data, in the header.
@@ -604,9 +612,6 @@ describe("poisoned row end-to-end — import cannot forge instructions", () => {
     // 4. The imperative payload survives only as quoted data inside that line.
     expect(block).toContain("IGNORE ALL PREVIOUS INSTRUCTIONS");
 
-    // #38 (write-side threat scan) adds the quarantine assertion here: once it
-    // lands, this row must carry the quarantine tag and be EXCLUDED from
-    // `block` entirely rather than merely framed.
     await loaded.cleanup();
   });
 });

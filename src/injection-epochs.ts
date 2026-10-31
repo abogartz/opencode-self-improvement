@@ -1,6 +1,6 @@
 // Per-setup injection epochs. Host event parsing and identity binding stay in
 // index.ts; this module owns frozen bytes, refresh decisions, and their status.
-import { isActive, isVisibleTo, loadAll, malformedCount, readerFromSid, type Memory } from "./memory.ts";
+import { isInjectable, isActive, isVisibleTo, loadAll, malformedCount, readerFromSid, type Memory } from "./memory.ts";
 import { SESSION_CAP, SessionLru } from "./sessions.ts";
 import { record } from "./evidence.ts";
 import {
@@ -142,7 +142,7 @@ export function createInjectionEpochs({
   // session's repo into this one's system prompt.
   const injectableRows = async (sid?: string): Promise<Memory[]> => {
     const reader = readerFromSid(sid);
-    return (await loadAll()).filter((m) => isActive(m) && isVisibleTo(m, reader));
+    return (await loadAll()).filter((m) => isInjectable(m) && isVisibleTo(m, reader));
   };
   // Render the COMPLETE memory section for one request: the standing digest,
   // the open-thread frontier and the convergence line (all from systemDigest),
@@ -307,6 +307,7 @@ export function createInjectionEpochs({
       epoch.delete(sid);
       latestPrompt.delete(sid);
     },
+    refresh: refreshEpoch,
     buildPayload,
     flushStatus,
   };

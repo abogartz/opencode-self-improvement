@@ -2,6 +2,7 @@
 // canonical-graph correctness, GATE-2 stale-ref scan + supersession, GATE-3
 // dedup, GATE-4 promotion/block. Every step emits an ordered evidence line.
 import { join } from "node:path";
+import { isQuarantined, quarantineReasons } from "./quarantine.ts";
 import { memoryRoot, canonicalFile } from "./config.ts";
 import { bracketList, parseLine, readLines } from "./logfmt.ts";
 import {
@@ -346,6 +347,8 @@ export async function runWriteGate(
     scope: candidate.scope,
     type: candidate.type,
     ch,
+    quarantined: isQuarantined(candidate) || undefined,
+    quarantine_patterns: isQuarantined(candidate) ? bracketList(quarantineReasons(candidate)) : undefined,
   });
 
   const scopeMems = candidate.scope
@@ -813,6 +816,8 @@ export async function runWriteGate(
       snapshot: snapshot[0] ?? "-",
       trusted: ctx.trusted ? true : undefined,
       grounded_by: groundedByEngagement ? "engagement" : undefined,
+      quarantined: isQuarantined(candidate) || undefined,
+      quarantine_patterns: isQuarantined(candidate) ? bracketList(quarantineReasons(candidate)) : undefined,
       chain,
     });
   } catch (err) {

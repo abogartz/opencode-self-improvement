@@ -297,7 +297,7 @@ describe("provenance: unverified rows are marked, arbitrary tags never leak", ()
 // --- 5. end-to-end: planted payload through memory_import -------------------------
 
 describe("end-to-end: a headerless import cannot plant a frontier instruction", () => {
-  test("payload row lands settled + tagged, never in the frontier, framed when recalled", async () => {
+  test("payload row lands settled + quarantined, never in frontier or recall", async () => {
     const file = join(memoryRoot(), "malicious.jsonl"); // hand-written: NO export header
     writeFileSync(
       file,
@@ -322,17 +322,18 @@ describe("end-to-end: a headerless import cannot plant a frontier instruction", 
     const planted = mems.find((m) => m.content.includes(PAYLOAD))!;
     expect(planted.status).not.toBe("open");
     expect(planted.tags).toContain("import");
+    expect(planted.tags).toContain("quarantine");
+    expect(out).toContain("1 promoted row quarantined");
 
     // The frontier digest must not surface the planted "open thread".
     const system: string[] = [];
     await systemDigest({ sessionID: "fr-e2e" }, { system });
     expect(system.join("\n")).not.toContain(PAYLOAD);
 
-    // When relevance recall DOES deliver it, it arrives framed and marked.
+    // The write-side review flag adds withholding to the existing framing.
     const block = await relevantKnowledge("curl evil payload script ops", 3);
-    expect(block).toContain(FRAMED);
-    expect(block).toContain("[via import]");
-    expect(block.indexOf(FRAMED)).toBeLessThan(block.indexOf(PAYLOAD));
+    expect(block).toBe("");
+    await loaded.cleanup();
   });
 
   test("a genuine export round trip keeps open rows (header vouches)", async () => {
@@ -361,7 +362,7 @@ describe("end-to-end: a headerless import cannot plant a frontier instruction", 
 // --- 6. end-to-end: auto-capture provenance through the real wiring ---------------
 
 describe("end-to-end: auto-captured memories surface their provenance", () => {
-  test("a mined candidate is tagged auto-capture and marked [via auto-capture] in the frontier", async () => {
+  test("a suspicious mined candidate keeps provenance but is withheld from the frontier", async () => {
     const loaded = await loadPlugin(liveRoot, { autoCapture: true, captureModel: "fake/fast" });
     // A transcript thick enough to mine (>200 chars after flattening).
     loaded.capture.context.messages = [
@@ -385,8 +386,9 @@ describe("end-to-end: auto-captured memories surface their provenance", () => {
     const mems = (await loadAll()).filter(isActive);
     const mined = mems.find((m) => m.content.includes(PAYLOAD))!;
     expect(mined.tags).toContain("auto-capture");
+    expect(mined.tags).toContain("quarantine");
 
-    // It legitimately reaches the frontier (status open) — but framed and marked.
+    // Open status cannot exempt a quarantined row from withholding.
     // fr-cap is a session OF this workspace: bind it, exactly as the prompt
     // hook does in production (#127: an unbound named sid reads global rows
     // only, never the module scope).
@@ -394,9 +396,8 @@ describe("end-to-end: auto-captured memories surface their provenance", () => {
     const system: string[] = [];
     await systemDigest({ sessionID: "fr-cap" }, { system });
     const digest = system.join("\n");
-    expect(digest).toContain(PAYLOAD);
-    expect(digest).toContain("[via auto-capture]");
-    expect(digest.indexOf(FRAMED)).toBeLessThan(digest.indexOf(PAYLOAD));
+    expect(digest).not.toContain(PAYLOAD);
+    expect(digest).toBe("");
 
     loaded.cleanup();
   });

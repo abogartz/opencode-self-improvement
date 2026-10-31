@@ -200,6 +200,7 @@ export const EditBody = z.object({
 export const DeleteBody = z.object({ ts: isoTs, reason: z.string() });
 export const BlockBody = z.object({ ts: isoTs, reason: z.string() });
 export const UnblockBody = z.object({ ts: isoTs });
+export const ReleaseQuarantineBody = z.object({ ts: isoTs, reason: z.string().trim().min(1) });
 // #35: lift a value-keyed rejection. `ch` is the 12-hex content hash the gate's
 // block hint names, and the same identifier a `dedup_rejected` evidence line
 // carries — so a human can act on either without reading the store by hand.

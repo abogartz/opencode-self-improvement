@@ -14,6 +14,7 @@ import {
   clearSuperseded,
   evidenceVisibleTo,
   isActive,
+  isInjectable,
   isVisibleTo,
   loadAll,
   malformedCount,
@@ -27,6 +28,7 @@ import {
 } from "./memory.ts";
 import { auditCaveat, runWriteGate, sameStrList, type GateContext, type WriteCandidate } from "./gates.ts";
 import { withStoreLock } from "./lock.ts";
+import { isQuarantined, quarantineCandidate, quarantineReasons } from "./quarantine.ts";
 import { pruneMemory } from "./prune.ts";
 import { exportMemories, findStaleOpen, importMemories } from "./portable.ts";
 import { listSnapshots, restoreSnapshot } from "./undo.ts";
@@ -465,7 +467,7 @@ const impl = {
         async execute(args, context): Promise<{ content: string }> {
           const { sid } = toolIds(context);
           const reader = readerFromSid(sid);
-          const all = (await loadAll()).filter(isActive).filter((m) => isVisibleTo(m, reader));
+          const all = (await loadAll()).filter(isInjectable).filter((m) => isVisibleTo(m, reader));
           const rows = args.scope ? all.filter((m) => m.scope === args.scope) : all;
           const ledger = await readLedger();
           const use = ledger.byRow;
@@ -512,7 +514,7 @@ const impl = {
         async execute(args, context): Promise<{ content: string }> {
           const { sid, call } = toolIds(context);
           const reader = readerFromSid(sid);
-          let results = (await loadAll()).filter(isActive).filter((m) => isVisibleTo(m, reader));
+          let results = (await loadAll()).filter(isInjectable).filter((m) => isVisibleTo(m, reader));
           if (!results.length) return { content: "No memories found" };
           const total = results.length;
           if (args.scope) results = results.filter((m) => m.scope.includes(args.scope!));
@@ -889,7 +891,7 @@ const impl = {
         async execute(_args, context): Promise<{ content: string }> {
           const { sid } = toolIds(context);
           const reader = readerFromSid(sid);
-          const mems = (await loadAll()).filter(isActive).filter((m) => isVisibleTo(m, reader));
+          const mems = (await loadAll()).filter(isInjectable).filter((m) => isVisibleTo(m, reader));
           if (!mems.length) return { content: "No memories found" };
           const scopes = new Map<string, number>();
           const types = new Map<string, number>();
@@ -1156,6 +1158,7 @@ const impl = {
               content:
                 `Imported ${args.file}: ${t.promoted} promoted, ${t.collapsed} duplicates collapsed, ` +
                 `${t.blocked} blocked by the gate, ${t.skipped} malformed lines skipped.` +
+                (t.quarantined ? ` ${t.quarantined} promoted ${t.quarantined === 1 ? "row" : "rows"} quarantined: withheld from recall/injection until human release in the viewer.` : "") +
                 (t.downgraded
                   ? ` ${t.downgraded} open rows downgraded to settled (missing eligible memory_export header or verifiable repo scope).`
                   : "") +
@@ -1252,6 +1255,8 @@ const impl = {
         async execute(_args, context): Promise<{ content: string }> {
           // In-process truth: the live epoch + ledger, fresher than any file.
           const sid = toolIds(context).sid;
+          const reportReader = readerFromSid(sid);
+          if (sid !== "?") await sessions.refresh(sid);
           const status = sid === "?" ? null : await sessions.buildPayload(sid);
           const all = await loadAll();
           const act = all.filter(isActive);
@@ -1275,7 +1280,10 @@ const impl = {
           store.rowsPerDay = rowsPerDay(act) ?? undefined;
           store.captureLag = captureLag(await captureLagLines());
           return {
-            content: renderMemoryReport({ status, store, blocked: await blockedRecent(6) }),
+            content: renderMemoryReport({ status, store, blocked: await blockedRecent(6),
+              quarantined: act.filter((m) => isVisibleTo(m, reportReader) && isQuarantined(m))
+                .map((m) => ({ ts: m.ts, patterns: quarantineReasons(m) })),
+            }),
           };
         },
       }));
@@ -1572,13 +1580,13 @@ const impl = {
             let outcome: Awaited<ReturnType<typeof runWriteGate>>;
             try {
               outcome = await runWriteGate(
-                {
+                quarantineCandidate({
                   ...c,
                   tags:
                     trigger === "compaction"
                       ? ["auto-capture", CAPTURE_COMPACT_TAG]
                       : ["auto-capture"],
-                },
+                }),
                 { ...captureGate, durable },
               );
             } catch (err) {

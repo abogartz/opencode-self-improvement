@@ -247,6 +247,14 @@ Every imported row re-enters through the same four gates as `memory_remember` (t
 | `skipped` | malformed line; never reached the gates |
 | `downgraded` | imported as settled because its `status:"open"` could not be vouched for |
 
+Import and auto-capture also scan incoming prose for a small set of instruction-override, role-header, and download/execute patterns. Matching rows still face every write gate; a promoted match is tagged `quarantine` and withheld from recall, prompt/frontier injection, compaction anchors, contextual pull, scope/type listings, consolidation proposals, and decay. Decay previews do not quote these rows, and applied decay leaves them in the human review queue. The import reply counts quarantined promotions, gate evidence records pattern identifiers without copying the matched prose, and `/memory-report` lists review IDs for the caller's repository.
+
+Review the full row in the memory viewer's **quarantined** filter. **Release quarantine** requires a reason, snapshots the pre-release row, and removes the quarantine flag and known scanner-reason tags; unrelated user labels such as `quarantine:custom`, repository ownership, row identity, blocklist, and supersession remain intact. Missing and already-released rows produce distinct, audited no-op outcomes. Existing prompt blocks refresh before the next delivery or status report when a row becomes quarantined or is released. Undoing a release can restore the quarantine flag.
+
+This is a heuristic review queue, not a complete prompt-injection detector: legitimate documentation or quoted code can match. Markdown-bold role headers and download-then-`&&`-execute forms are recognized, but alternate role delimiters such as `[INST]` / `<<SYS>>`, base64-to-shell pipelines, paraphrased instructions, and indirect execution can evade it. Direct `memory_remember` and human viewer edits are explicit writes and are not automatically scanned: a session with that tool still has a prose channel, mitigated by the existing framing and provenance rather than quarantine. Those defenses still apply to released rows.
+
+Existing stores are not rescanned. A byte-identical import that collapses into an existing row does not retroactively tag that row. Export preserves quarantined rows and their tags to avoid data loss; an exported released row can be quarantined again when re-import promotes it on another machine.
+
 An open row is exempt from reference grounding, so that status is honored only for files carrying an export header. Even with a header: an open row claiming `repo:"global"` is downgraded, and imported `repo` / `repoPath` stamps are kept only when they match the importing session's current repo — foreign stamps are dropped and the row is stamped for the importing repo. Re-running the same import in the same repo is a no-op.
 
 ## Surfaces

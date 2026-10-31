@@ -18,6 +18,7 @@ import {
   loadAll,
   markSuperseded,
   snapshotFiles,
+  releaseQuarantine,
   type Memory,
 } from "../memory.ts";
 
@@ -192,6 +193,21 @@ async function audit(
       reason: redactSecrets(reason),
     }),
   );
+}
+
+export async function releaseQuarantinedMemory(ts: string, reason: string): Promise<{ released: boolean; reason?: "not_found" | "not_quarantined"; auditError?: string }> {
+  // Layered with ReleaseQuarantineBody's trim/min check. Neither layer alone
+  // is pinned by the route rejection test; direct callers still need this one.
+  requireReason(reason);
+  const outcome = await releaseQuarantine(ts);
+  const result = outcome === "released" ? { released: true } : { released: false, reason: outcome };
+  try {
+    await record(result.released ? "quarantine_released" : "quarantine_release_noop", { mem: ts, reason, outcome, source: "viewer" }, false);
+    return result;
+  } catch {
+    // Release is already durable; an audit failure must not pretend otherwise.
+    return { ...result, auditError: `${result.released ? "Release succeeded" : `No release applied (${outcome})`}, but its audit line could not be recorded.` };
+  }
 }
 
 // Blocking is a human rejection, so it tombstones the VALUE as well as hiding

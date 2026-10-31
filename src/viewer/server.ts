@@ -8,12 +8,14 @@ import { basename, join } from "node:path";
 import { isIP } from "node:net";
 import { serve, type Server } from "bun";
 import { z, type ZodTypeAny } from "zod";
-import { BlockBody, DeleteBody, EditBody, RestoreEntryBody, UnblockBody, UnrejectBody } from "../schema.ts";
+import { BlockBody, DeleteBody, EditBody, RestoreEntryBody, UnblockBody, UnrejectBody, ReleaseQuarantineBody } from "../schema.ts";
 import { deletionsFile, memoryRoot, snapshotDir } from "../config.ts";
 import { blockedEntries } from "../blocklist.ts";
 import { listSnapshots, restoreSnapshot } from "../undo.ts";
 import { appendMemory, loadAll, memoryFiles } from "../memory.ts";
 import { parseLine, readLines } from "../logfmt.ts";
+import { releaseQuarantinedMemory } from "./mutate.ts";
+import { isQuarantined, quarantineReasons } from "../quarantine.ts";
 import { deleteMemory, editMemory, blockMemory, unblockMemory, unrejectMemory, type MutationResult } from "./mutate.ts";
 import { tombstones } from "../tombstones.ts";
 
@@ -209,6 +211,8 @@ async function loaded(): Promise<Record<string, unknown>> {
       content: m.content,
       issue: m.issue,
       tags: m.tags,
+      quarantined: isQuarantined(m),
+      quarantinePatterns: quarantineReasons(m),
       superseded_by: m.superseded_by,
       reason: m.reason,
       // The viewer is the explicit ADMIN read surface (header comment): it
@@ -242,6 +246,10 @@ async function route(req: Request, url: URL): Promise<Response> {
     if (url.pathname === "/api/delete") return parseWith(DeleteBody, body, deleteRoute);
     if (url.pathname === "/api/block") return parseWith(BlockBody, body, blockRoute);
     if (url.pathname === "/api/unblock") return parseWith(UnblockBody, body, unblockRoute);
+    if (url.pathname === "/api/release-quarantine") {
+      return parseWith(ReleaseQuarantineBody, body, async ({ ts, reason }) =>
+        json(await releaseQuarantinedMemory(ts, reason)));
+    }
     if (url.pathname === "/api/unreject") return parseWith(UnrejectBody, body, unrejectRoute);
     if (url.pathname === "/api/restore-entry") return parseWith(RestoreEntryBody, body, restoreEntryRoute);
     // /api/restore is deliberately NOT schema-parsed here: its name check is

@@ -101,6 +101,7 @@
         <option value="active">active</option>
         <option value="all">all (incl. superseded)</option>
         <option value="superseded">superseded</option>
+        <option value="quarantined">quarantined (review required)</option>
         <option value="blocked">blocked</option>
         <option value="deleted">deleted</option>
         <option value="rejected">rejected values</option>
@@ -189,6 +190,7 @@ function currentList() {
   if (fus === "deleted") return { list: DATA.deleted, kind: "deleted" };
   if (fus === "rejected") return { list: DATA.rejections, kind: "rejected" };
   if (fus === "superseded") return { list: DATA.memories.filter((m) => m.superseded_by), kind: "superseded" };
+  if (fus === "quarantined") return { list: DATA.memories.filter((m) => m.quarantined && !m.superseded_by), kind: "quarantined" };
   if (fus === "all") return { list: DATA.memories, kind: "all" };
   return { list: DATA.memories.filter((m) => !m.superseded_by), kind: "active" };
 }
@@ -223,7 +225,7 @@ function render() {
 
   $("rows").innerHTML = rows.map((m) => {
     const status = kind === "blocked" ? "blocked" : kind === "deleted" ? "deleted"
-      : m.superseded_by ? "superseded" : "active";
+      : m.superseded_by ? "superseded" : m.quarantined ? "quarantined" : "active";
     const stBadge = status === "superseded" ? badge("status-superseded", "superseded \u2192 " + m.superseded_by.slice(0,8))
       : badge("status-" + status, status);
     const actions = kind === "blocked"
@@ -232,7 +234,8 @@ function render() {
         ? `<button class="btn warn" data-action="restore-deleted" data-ts="${esc(m.ts)}" data-type="${esc(m.type)}" data-scope="${esc(m.scope)}" data-content="${esc(m.content)}" data-repo="${esc(m.repo ?? "")}" data-repo-path="${esc(m.repoPath ?? "")}" title="Re-add this deleted entry to memory">restore</button>`
         : `<button class="btn" data-action="edit" data-ts="${esc(m.ts)}" title="Edit: snapshot, supersede this entry, append the replacement">edit</button>
            <button class="btn danger" data-action="delete" data-ts="${esc(m.ts)}" title="Delete: snapshot the file, then remove this entry (audited)">delete</button>
-           <button class="btn danger" data-action="block" data-ts="${esc(m.ts)}" title="Block (poison): keep on disk but hide from recall/inject">block</button>`;
+           <button class="btn danger" data-action="block" data-ts="${esc(m.ts)}" title="Block (poison): keep on disk but hide from recall/inject">block</button>
+           ${m.quarantined && !m.superseded_by ? `<button class="btn warn" data-action="release-quarantine" data-ts="${esc(m.ts)}" title="Approve this content for recall and injection">release quarantine</button>` : ""}`;
     return `<tr>
       <td class="ts">${tsCell(m.ts)}</td>
       <td>${badge("type", m.type)}</td>
@@ -327,6 +330,22 @@ async function unblock(ts) {
   } catch (e) { toast(String(e.message), true); }
 }
 
+function releaseQuarantine(ts) {
+  const m = DATA.memories.find((x) => x.ts === ts);
+  askModal(
+    `Release quarantined memory ${ts.slice(0, 19)}?`,
+    `This content matched ${m?.quarantinePatterns?.join(", ") || "a review flag"}. Review the row before approving it for recall and prompt injection. Blocking and supersession still apply.`,
+    "Release",
+    async (reason) => {
+      try {
+        const result = await api("/api/release-quarantine", { ts, reason });
+        toast(result.auditError || (result.released ? "quarantine released" : result.reason === "not_found" ? "memory row not found; nothing released" : "row is already outside quarantine; nothing changed"), !!result.auditError || result.reason === "not_found");
+        await refresh();
+      } catch (e) { toast(String(e.message), true); }
+    },
+  );
+}
+
 // The human-only escape hatch for #35. No confirmation prompt asking "why": the
 // operator already owns the store, and a rejection they are lifting is by
 // definition one they no longer agree with.
@@ -369,6 +388,7 @@ $("rows").addEventListener("click", (e) => {
   else if (action === "delete") del(ts);
   else if (action === "block") block(ts);
   else if (action === "unblock") unblock(ts);
+  else if (action === "release-quarantine") releaseQuarantine(ts);
   else if (action === "un-reject") unreject(btn.dataset.ch);
   else if (action === "restore-deleted") {
     const { type, scope, content, repo, repoPath } = btn.dataset;

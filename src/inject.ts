@@ -3,7 +3,7 @@
 // session context hook's system parts. Contextual pull appends relevant memory
 // to grep/glob/read results. Evidence is never injected.
 import { createHash } from "node:crypto";
-import { isActive, loadAll, readerFromSid, visibleTo, type Memory } from "./memory.ts";
+import { isInjectable, loadAll, readerFromSid, visibleTo, type Memory } from "./memory.ts";
 import { record } from "./evidence.ts";
 import { dateStr, frontierBudget, injectBudget } from "./config.ts";
 import { bracketList } from "./logfmt.ts";
@@ -116,7 +116,7 @@ const LONG_QUERY_TOKENS = 3;
 // matcher.
 //
 // Superseded rows are dropped HERE, not only by the callers. Every model-facing
-// sink already passes isActive() rows, but a scorer that can be handed a raw
+// sink already passes isInjectable() rows, but a scorer that can be handed a raw
 // loadAll() result must not be the one place a retired memory leaks back into
 // an injected block (#43 item 1: forbidden hits). The drop also keeps a
 // retired row from diluting the document frequencies the ranking depends on.
@@ -126,7 +126,7 @@ export function scoreMemories(
   limit: number,
   use?: UseSignals,
 ): Memory[] {
-  const live = mems.filter((m) => !m.superseded_by);
+  const live = mems.filter(isInjectable);
   const query = new Set(words(term).filter((t) => !QUERY_STOPWORDS.has(t)));
   if (!query.size) return [];
   const needShared = query.size >= LONG_QUERY_TOKENS ? 2 : 1;
@@ -286,7 +286,7 @@ export async function systemDigest(
   // Repo-scoped: model-facing reads see the CALLER's repo + global rows, via
   // the sid carried on this flow's input (#127) — never a global re-read
   // after the loadAll await.
-  const mems = opts.rows ?? visibleTo((await loadAll()).filter(isActive), readerFromSid(sid));
+  const mems = (opts.rows ?? visibleTo(await loadAll(), readerFromSid(sid))).filter(isInjectable);
   if (!mems.length) return;
   // CACHE-STABLE BY CONSTRUCTION (issue #162): this line carries no row count
   // and no latest-ts. Both change on every promoted write, and the digest rides
@@ -349,7 +349,7 @@ export async function selectRelevant(
   if (!text) return { block: "", selected: [] };
   // Repo-scoped: model-facing reads see the caller's repo + global rows
   // (their session when one was threaded, #127).
-  const mems = rows ?? visibleTo((await loadAll()).filter(isActive), readerFromSid(sid));
+  const mems = (rows ?? visibleTo(await loadAll(), readerFromSid(sid))).filter(isInjectable);
   const top = scoreMemories(text, mems, limit, use);
   if (!top.length) return { block: "", selected: [] };
   return {
@@ -379,7 +379,7 @@ export function injectedRows(block: string, candidates: Memory[]): Memory[] {
 // loadAll() already had to read and parse for the request.
 export async function storeVersion(rows?: Memory[], sid?: string): Promise<string> {
   // Repo-scoped: model-facing reads see the caller's repo + global rows.
-  const mems = rows ?? visibleTo((await loadAll()).filter(isActive), readerFromSid(sid));
+  const mems = (rows ?? visibleTo(await loadAll(), readerFromSid(sid))).filter(isInjectable);
   if (!mems.length) return "0:";
   let max = "";
   const hash = createHash("sha256");
@@ -424,7 +424,7 @@ const ANCHOR_BUDGET = 2500;
 
 export async function compactionAnchor(limit = 12, sid?: string): Promise<string> {
   // Repo-scoped: model-facing reads see the caller's repo + global rows.
-  const mems = visibleTo((await loadAll()).filter(isActive), readerFromSid(sid));
+  const mems = visibleTo((await loadAll()).filter(isInjectable), readerFromSid(sid));
   if (!mems.length) return "";
   const byNewest = (a: Memory, b: Memory) => cmpTs(b.ts, a.ts);
   const open = mems
@@ -456,7 +456,7 @@ export async function contextualPull(
   if (!term) return [];
   // Repo-scoped: model-facing reads see the CALLER's repo + global rows —
   // the pull's own sessionID, resolved before the store read (#127).
-  const mems = visibleTo((await loadAll()).filter(isActive), readerFromSid(input.sessionID));
+  const mems = visibleTo((await loadAll()).filter(isInjectable), readerFromSid(input.sessionID));
   const top = scoreMemories(term, mems, 3, use);
   if (!top.length) return [];
   // Held to the injection budget too: three long rows were ~12 KB per call.

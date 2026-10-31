@@ -9,8 +9,10 @@ import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { allowOutsideStorePaths, exportsDir, memoryRoot } from "./config.ts";
 import { resolveContained } from "./containment.ts";
+import { isQuarantined, quarantineCandidate } from "./quarantine.ts";
 import {
   isActive,
+  isInjectable,
   isVisibleTo,
   loadAll,
   readerFromSid,
@@ -189,6 +191,7 @@ export async function exportMemories(opts: ExportOptions = {}): Promise<ExportRe
 
 export interface ImportTally {
   promoted: number;
+  quarantined?: number;
   collapsed: number;
   blocked: number;
   skipped: number;
@@ -256,7 +259,7 @@ function parseRow(line: string): WriteCandidate | null {
   // machine. Unstamped rows stay global.
   if (typeof r.repo === "string" && r.repo) c.repo = r.repo;
   if (typeof r.repoPath === "string" && r.repoPath) c.repoPath = r.repoPath;
-  return c;
+  return quarantineCandidate(c);
 }
 
 // Read a JSONL export and run every valid row through `gate`. The CALLER owns
@@ -350,6 +353,7 @@ export async function importMemories(
     const outcome = await gate(c);
     if (outcome.action === "promoted") {
       tally.promoted++;
+      if (isQuarantined(c)) tally.quarantined = (tally.quarantined ?? 0) + 1;
       if (outcome.evidenceError !== undefined) {
         tally.unaudited++;
         tally.auditError ??= outcome.evidenceError;
@@ -370,6 +374,6 @@ export async function findStaleOpen(days: number, sid?: string): Promise<Memory[
   return (await loadAll())
     // Decay is repo-scoped: running it here must not retire
     // another repo's open threads.
-    .filter((m) => isActive(m) && isVisibleTo(m, reader) && m.status === "open" && m.ts < cutoff)
+    .filter((m) => isInjectable(m) && isVisibleTo(m, reader) && m.status === "open" && m.ts < cutoff)
     .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
 }
