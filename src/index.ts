@@ -794,7 +794,7 @@ const impl = {
                           symbol: target.ts,
                           from: target.ts,
                           to: survivorTs,
-                        });
+                        }, gateDurable);
                         if (done) {
                           return {
                             content:
@@ -854,8 +854,8 @@ const impl = {
                 ? `memory_update PARTIAL: a step after the durable write failed: ${msg}. ` +
                   "Re-running this update reports the duplicate; inspect with memory_evidence."
                 : gateDurable.length > 0
-                  ? `memory_update blocked: ${msg} No replacement was written, but the gate had ALREADY retired ` +
-                    `${gateDurable.length} other row(s) (${gateDurable.join(", ")}): those retirements ARE on ` +
+                  ? `memory_update PARTIAL: ${msg} No replacement was written, but this call had ALREADY retired ` +
+                    `${gateDurable.length} row(s) (${gateDurable.join(", ")}): those retirements ARE on ` +
                     "disk and their audit lines may not all have landed. Re-running this update will not undo " +
                     "them — reconcile with memory_evidence / memory_undo before retrying."
                   : `memory_update blocked: ${msg} Nothing was written.`,
@@ -872,6 +872,7 @@ const impl = {
         async execute(args, context): Promise<{ content: string }> {
           const { sid } = toolIds(context);
           const res = await pruneMemory(args.scope, args.type, args.reason, sid);
+          if (res.error) return { content: `memory_forget PARTIAL: deleted row(s) ${res.deleted.map((d) => d.memory.ts).join(", ")}; stopped: ${res.error}. Rejection tombstones or audit lines may be incomplete. Inspect memory_evidence / memory_undo before retrying.` };
           if (!res.deleted.length) return { content: `No memories found for ${args.type} in ${args.scope}` };
           return { content: `Deleted ${res.deleted.length} ${args.type} memory(s) from ${args.scope}. Audit: ${res.audit}` };
         },
@@ -985,7 +986,7 @@ const impl = {
       editor.add(validated(MergeReviewArgs, {
         name: "memory_merge_review",
         description:
-          "Resolve an open merge/review gate non-destructively: mark the loser as superseded_by the survivor, and clear any supersession the survivor itself carries so the canonical row stays recallable. Both rows stay active data (the loser is recoverable via memory_undo); nothing is deleted. A session may merge exactly the rows it may read: global rows are mergeable from anywhere, but a row belonging to another repository is refused in either seat. Fails closed (no partial apply) when the reason or the survivor id is missing, the survivor id names no row in the store, the loser is already superseded or is the survivor itself, or either seat names a foreign repository's row.",
+          "Resolve an open merge/review gate non-destructively: mark the loser as superseded_by the survivor, and clear any supersession the survivor itself carries so the canonical row stays recallable. Both rows stay active data (the loser is recoverable via memory_undo); nothing is deleted. A session may merge exactly the rows it may read: global rows are mergeable from anywhere, but a row belonging to another repository is refused in either seat. Refuses before writing when the reason or the survivor id is missing, the survivor id names no row in the store, the loser is already superseded or is the survivor itself, or either seat names a foreign repository's row. Later lock or I/O failures can leave partial changes; the reply names the completed retirement and failure.",
         options: direct,
         async execute(args, context): Promise<{ content: string }> {
           const { sid } = toolIds(context);
@@ -1008,11 +1009,9 @@ const impl = {
           // this cannot deadlock against a plain writer; on timeout it fails
           // closed with nothing written.
           const reader = readerFromSid(sid);
-          // Where a throw lands decides what is true to say: before the
-          // mutation nothing was written (the documented fail-closed
-          // contract); AFTER markSuperseded the loser IS retired on disk and
-          // claiming "nothing was done" is a lie (review probe 5).
-          let mutated = false;
+          // A batch may publish the loser then refuse a later file. The sink
+          // records that publish before the overall promise settles (#197).
+          const mergeDurable: string[] = [];
           try {
             return await withStoreLock(
               join(memoryRoot(), "update-order"),
@@ -1047,11 +1046,10 @@ const impl = {
                   symbol: args.loser,
                   from: args.loser,
                   to: args.survivor,
-                });
+                }, mergeDurable);
                 if (!ok) {
                   return { content: "merge_review: loser not found or already superseded — nothing to resolve. No evidence written." };
                 }
-                mutated = true;
                 // The survivor may itself have been superseded earlier (e.g. by
                 // a row this very call just made the loser). Declaring it
                 // canonical has to make it recallable, so clear its own marker.
@@ -1089,19 +1087,19 @@ const impl = {
             );
           } catch (err) {
             // Before mutation this is the fail-closed lock contract: nothing
-            // written. After markSuperseded succeeded the loser IS retired —
+            // written. Once a file published, the loser IS retired —
             // the honest report names the completed mutation and the failed
             // follow-up (evidence/revive), not a blanket "nothing was done".
-            if (!mutated) {
+            const why = err instanceof Error ? err.message : String(err);
+            if (mergeDurable.length === 0) {
               return {
-                content: "merge_review blocked: the store was busy past the lock budget — nothing was done. Retry.",
+                content: `merge_review blocked: ${why} — nothing was done. Retry.`,
               };
             }
-            const why = err instanceof Error ? err.message : String(err);
             return {
               content:
                 `merge_review PARTIAL: ${args.loser} IS retired on disk (superseded_by ${args.survivor}; ` +
-                `recoverable via memory_undo) but a post-mutation step failed: ${why}. ` +
+                `recoverable via memory_undo) but the remaining operation failed: ${why}. ` +
                 `The evidence line may be missing; re-running reports the loser already superseded.`,
             };
           }
@@ -1211,15 +1209,24 @@ const impl = {
           // One lock/read/snapshot/publish per file for the whole decay run (#61):
           // N retired rows are one undo point, not N. Idempotent (a no-op on rows
           // already superseded, out-of-band ones skipped under the lock).
-          const retired = await markManySuperseded(
-            stale.map((m) => ({ ts: m.ts, fields: { superseded_by: "decay", reason: "decay" } })),
-          );
+          const durable: string[] = [];
+          let retired: number;
+          try {
+            retired = await markManySuperseded(
+              stale.map((m) => ({ ts: m.ts, fields: { superseded_by: "decay", reason: "decay" } })), durable,
+            );
+          } catch (err) {
+            if (durable.length === 0) throw err;
+            let why = err instanceof Error ? err.message : String(err);
+            await record("decay_applied", { days, retired: durable.length, mem: durable.join(","), snapshot: snapshot.join(","), partial: true, error: why }, false).catch((audit) => { why += `; audit failed: ${String(audit)}`; });
+            return { content: `memory_decay PARTIAL: retired row(s) ${durable.join(", ")}; stopped: ${why}. Recover with memory_undo; inspect memory_evidence before retrying.` };
+          }
           await record(
             "decay_applied",
             {
               days,
               retired,
-              mem: stale.map((m) => m.ts).join(",") || "-",
+              mem: durable.join(",") || "-",
               snapshot: snapshot.join(",") || "-",
             },
             false,
@@ -1557,16 +1564,28 @@ const impl = {
           const text = typeof out === "string" ? out : out?.text ?? "";
           const candidates = parseCandidates(text, captureMax);
           for (const c of candidates) {
-            const outcome = await runWriteGate(
-              {
-                ...c,
-                tags:
-                  trigger === "compaction"
-                    ? ["auto-capture", CAPTURE_COMPACT_TAG]
-                    : ["auto-capture"],
-              },
-              captureGate,
-            );
+            const durable: string[] = [];
+            let outcome: Awaited<ReturnType<typeof runWriteGate>>;
+            try {
+              outcome = await runWriteGate(
+                {
+                  ...c,
+                  tags:
+                    trigger === "compaction"
+                      ? ["auto-capture", CAPTURE_COMPACT_TAG]
+                      : ["auto-capture"],
+                },
+                { ...captureGate, durable },
+              );
+            } catch (err) {
+              // A refused write must not disappear into the hook's fail-soft
+              // wrapper. Preserve any earlier gate retirements in the receipt.
+              await record(durable.length ? "auto_capture_partial" : "auto_capture_refused", {
+                session: sid, trigger, type: c.type, scope: redactSecrets(c.scope),
+                reason: String(err), retired: durable.join(",") || undefined,
+              }, false, sid);
+              continue;
+            }
             await record(
               trigger === "compaction"
                 ? `auto_capture_compaction_${outcome.action}`

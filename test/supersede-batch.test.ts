@@ -167,8 +167,8 @@ describe.skipIf(process.platform !== "win32")("batch publish under Windows reade
       () => "ok",
       () => "failed",
     );
-    // A starved waiter runs its append WITHOUT the lock (lock.ts onTimeout):
-    // this is exactly what a retried-blind rename would have overwritten.
+    // Simulate an out-of-band/legacy writer bypassing the lock. Current
+    // LOCK_WRITE callers fail closed, but this defense must still hold.
     await Bun.sleep(60).then(() =>
       appendFile(file, formatLine({ ts: stray, type: "learning", scope: "batch", content: "degraded mid-window append here" }) + "\n"),
     );

@@ -444,11 +444,10 @@ export async function runWriteGate(
     });
   }
   if (driftPlan.length > 0) {
-    const { marked } = await markManySupersededReport(driftPlan.map((p) => ({ ts: p.s.memory.ts, fields: p.fields })));
+    const { marked } = await markManySupersededReport(driftPlan.map((p) => ({ ts: p.s.memory.ts, fields: p.fields })), ctx.durable);
     if (marked.length > 0) {
       // Ledger BEFORE the audit lines: what is on disk now stays on disk no
       // matter what the record loop below does (round-3 probe 3).
-      ctx.durable?.push(...marked);
       for (const p of driftPlan) {
         supersededTs = p.s.memory.ts;
         await rec("superseded_by", {
@@ -497,10 +496,10 @@ export async function runWriteGate(
         ts: p.ts,
         fields: { superseded_by: target, reason: "canonical", entity: canon.entry.entity, from: p.from, to: canon.entry.value },
       })),
+      ctx.durable,
     );
     if (canonMarked.length > 0) {
       // Same ledger discipline as the drift batch above.
-      ctx.durable?.push(...canonMarked);
       for (const p of canonPlan) {
         if (!supersededTs) supersededTs = p.ts;
         await rec("superseded_by", {

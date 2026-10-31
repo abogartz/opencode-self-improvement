@@ -295,10 +295,9 @@ export async function tombstones(): Promise<Tombstone[]> {
  * pair plus a full read per row, and `memory_forget` deletes by scope+type, so a
  * bulk forget issued hundreds of lock cycles while other sessions were writing.
  * The heavy concurrent scenario on the Windows runner failed 2/2 with that shape
- * (run 41112466339) and never on main; src/lock.ts gives up waiting after 5s and
- * proceeds UNLOCKED, which is precisely how a row gets lost behind a long
- * read-modify-write. Whether the batch is sufficient there is the open question
- * this commit's CI run answers; the cost it removes is real either way.
+ * (run 41112466339). At that time, lock-budget expiry let a writer proceed
+ * unlocked, losing rows behind a long read-modify-write. LOCK_WRITE now refuses
+ * on timeout (#196); batching still reduces lock contention and its I/O cost.
  *
  * Still idempotent by `ch`, and de-duplicated WITHIN the batch too, so a forget
  * that removes fifty rows carrying the same content records one tombstone.

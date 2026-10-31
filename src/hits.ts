@@ -127,6 +127,9 @@ export async function recordHits(
     );
     return true;
   } catch {
+    // Fail-closed lock contention can drop this use observation. Decay and
+    // consolidation therefore see a best-effort ledger, not proof of non-use;
+    // retrieval remains available even when its telemetry cannot be persisted.
     return false; // telemetry never breaks retrieval
   }
 }
