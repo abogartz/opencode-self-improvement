@@ -10,7 +10,7 @@ import { existsSync } from "node:fs";
 import { cbmBin } from "./config.ts";
 import { isVisibleTo, loadAll, markSuperseded, readerFromSid, type Reader } from "./memory.ts";
 import { runWriteGate, type GateContext } from "./gates.ts";
-import { record } from "./evidence.ts";
+import { captureEvidenceContext, record } from "./evidence.ts";
 import { writeEvidence, hasGateCheck } from "./triggers.ts";
 import { writeTarget } from "./repokey.ts";
 import { getCurrent } from "./state.ts";
@@ -210,6 +210,7 @@ export async function initStamp(scope: string, sid?: string, reader: Reader = re
 export async function runInit(args: InitArgs): Promise<InitSummary> {
   const reader = readerFromSid(args.sessionID);
   const writeAt = writeTarget(args.sessionID ?? getCurrent().sid);
+  const evidenceContext = captureEvidenceContext(args.sessionID);
   const root = await gitRootOf(args.liveRoot);
   const scope = basename(root) || basename(args.liveRoot);
   const head = await gitHead(root);
@@ -220,6 +221,7 @@ export async function runInit(args: InitArgs): Promise<InitSummary> {
     liveRoot: root,
     reader,
     writeAt,
+    evidenceContext,
     ...writeEvidence(args.sessionID ?? getCurrent().sid),
     hasGateCheck: hasGateCheck(args.sessionID ?? getCurrent().sid),
     // Stamps land on the caller's session even though runInit awaits git

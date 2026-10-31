@@ -85,6 +85,7 @@
     <span>superseded <b id="cSuper">0</b></span>
     <span>blocked <b id="cBlocked">0</b></span>
     <span>deleted <b id="cDeleted">0</b></span>
+    <span>rejected <b id="cRejected">0</b></span>
   </div>
   <span class="spacer"></span>
   <code id="rootLabel" style="color:var(--muted);font-size:12px"></code>
@@ -102,6 +103,7 @@
         <option value="superseded">superseded</option>
         <option value="blocked">blocked</option>
         <option value="deleted">deleted</option>
+        <option value="rejected">rejected values</option>
       </select>
     </div>
 
@@ -185,6 +187,7 @@ function currentList() {
   const fus = $("fStatus").value;
   if (fus === "blocked") return { list: DATA.blocked, kind: "blocked" };
   if (fus === "deleted") return { list: DATA.deleted, kind: "deleted" };
+  if (fus === "rejected") return { list: DATA.rejections, kind: "rejected" };
   if (fus === "superseded") return { list: DATA.memories.filter((m) => m.superseded_by), kind: "superseded" };
   if (fus === "all") return { list: DATA.memories, kind: "all" };
   return { list: DATA.memories.filter((m) => !m.superseded_by), kind: "active" };
@@ -199,7 +202,24 @@ function render() {
   let rows = list.slice();
   if (fs) rows = rows.filter((m) => m.scope === fs);
   if (ft) rows = rows.filter((m) => m.type === ft);
-  if (q) rows = rows.filter((m) => `${m.type} ${m.scope} ${m.content}`.toLowerCase().includes(q));
+  if (q) rows = rows.filter((m) => `${m.type} ${m.scope} ${m.content ?? m.ch ?? ""}`.toLowerCase().includes(q));
+
+  // Rejected VALUES (#35) have no row and no prose — the tombstone stores a
+  // hash by design, so they get their own row shape rather than pretending to
+  // be memories with an empty content cell.
+  if (kind === "rejected") {
+    $("rows").innerHTML = rows.map((t) => `<tr>
+      <td class="ts">${esc(t.rejected_at)}</td>
+      <td>${badge("type", t.type || "-")}</td>
+      <td>${badge("scope", t.scope || "-")}</td>
+      <td class="content"><code>${esc(t.ch)}</code> ${esc(t.reason || "(no reason recorded)")} <span style="color:var(--muted)">· rejected via ${esc(t.source)}</span></td>
+      <td>${badge("status-blocked", "rejected")}</td>
+      <td class="actions"><button class="btn warn" data-action="un-reject" data-ch="${esc(t.ch)}" title="Lift this rejection so the value can be stored again">un-reject</button></td>
+    </tr>`).join("");
+    $("empty").style.display = rows.length ? "none" : "block";
+    $("cRejected").textContent = DATA.rejections.length;
+    return;
+  }
 
   $("rows").innerHTML = rows.map((m) => {
     const status = kind === "blocked" ? "blocked" : kind === "deleted" ? "deleted"
@@ -228,6 +248,7 @@ function render() {
   $("cSuper").textContent = DATA.memories.filter((m) => m.superseded_by).length;
   $("cBlocked").textContent = DATA.blocked.length;
   $("cDeleted").textContent = DATA.deleted.length;
+  $("cRejected").textContent = DATA.rejections.length;
 }
 
 async function refresh() {
@@ -306,6 +327,17 @@ async function unblock(ts) {
   } catch (e) { toast(String(e.message), true); }
 }
 
+// The human-only escape hatch for #35. No confirmation prompt asking "why": the
+// operator already owns the store, and a rejection they are lifting is by
+// definition one they no longer agree with.
+async function unreject(ch) {
+  try {
+    await api("/api/unreject", { ch });
+    toast(`rejection lifted for ${ch} — the value can be stored again`);
+    await refresh();
+  } catch (e) { toast(String(e.message), true); }
+}
+
 function restoreEntry(type, scope, content, repo, repoPath) {
   askModal(
     "Restore deleted memory?",
@@ -337,6 +369,7 @@ $("rows").addEventListener("click", (e) => {
   else if (action === "delete") del(ts);
   else if (action === "block") block(ts);
   else if (action === "unblock") unblock(ts);
+  else if (action === "un-reject") unreject(btn.dataset.ch);
   else if (action === "restore-deleted") {
     const { type, scope, content, repo, repoPath } = btn.dataset;
     restoreEntry(type, scope, content, repo, repoPath);

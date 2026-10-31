@@ -9,7 +9,8 @@ import { exportMemories, importMemories } from "../src/portable.ts";
 import * as evidence from "../src/evidence.ts";
 import { appendMemory, isVisibleTo, loadAll, readerForSession, type Memory } from "../src/memory.ts";
 import { rememberSessionDir, resetSessionScopes, resolveRepo, sessionScope, setRepoScope } from "../src/repokey.ts";
-import { resetState } from "../src/state.ts";
+import { resetState, setCurrent } from "../src/state.ts";
+import { tombstone } from "../src/tombstones.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
 
 const envKeys = ["OPENCODE_MEMORY_DIR", "OPENCODE_COMMANDS_DIR"] as const;
@@ -300,4 +301,86 @@ test.each([{ moves: false }, { moves: true }])("unscoped ambient gate pins expli
   expect(tally.promoted).toBe(1);
   expect((await row(imported!)).repo).toBe("global");
   expect((await row(imported!)).repoPath).toBeUndefined();
+});
+
+
+test.each([{ blocked: false }, { blocked: true }])("gate evidence stays with operation repository (blocked: $blocked)", async ({ blocked }) => {
+  const pa = await plugin(a);
+  const pb = await plugin(b);
+  rememberSessionDir("writer", a);
+  setCurrent({ sessionID: "writer", callID: "operation-call", tool: "memory_remember" });
+  const moved = moveDuringGate(pa);
+  const outcome = await runWriteGate({ ...fields, status: blocked ? "settled" : "open", content: "Private operation metadata belongs to the original repository" }, {
+    sessionID: "writer", liveRoot: a, evidenceCalls: [], hasGateCheck: false,
+  });
+  expect(moved()).toBe(true);
+  expect(outcome.action).toBe(blocked ? "blocked" : "promoted");
+  const event = blocked ? "write_blocked" : "write_promoted";
+  const own = await pa.tools.memory_evidence.execute({ ev: event }, ctx("evidence-reader-a"));
+  const foreign = await pb.tools.memory_evidence.execute({ ev: event }, ctx("evidence-reader-b"));
+  expect(foreign.content).not.toContain(outcome.chain);
+  expect(own.content).toContain(outcome.chain);
+  const started = await pa.tools.memory_evidence.execute({ ev: "gate_start" }, ctx("evidence-reader-a"));
+  expect(started.content).toContain(outcome.chain);
+  expect(own.content).toContain("sid=writer");
+  expect(own.content).toContain("call=operation-call");
+  if (!blocked) {
+    if (!outcome.ts) throw new Error("promoted gate outcome is missing its row id");
+    expect((await row(outcome.ts)).repo).toBe(resolveRepo(a).key);
+  }
+});
+
+test("captured unresolved evidence stays private and scrubbed after binding", async () => {
+  const pa = await plugin(a);
+  const pb = await plugin(b);
+  setCurrent({ sessionID: "other", callID: "foreign-call" });
+  const captured = evidence.captureEvidenceContext("unresolved");
+  expect(captured.scope).toBeNull();
+  rememberSessionDir("unresolved", b);
+  const secret = "sk-" + "proj-AbCdEf1234567890AbCdEf1234567890abcdef";
+  await evidence.record("private_probe", { note: secret }, true, "unresolved", captured);
+  const own = await pa.tools.memory_evidence.execute({ ev: "private_probe" }, ctx("unresolved"));
+  const foreign = await pb.tools.memory_evidence.execute({ ev: "private_probe" }, ctx("other-reader"));
+  expect(own.content).toContain("ev=private_probe");
+  expect(own.content).not.toContain(secret);
+  expect(own.content).not.toContain("foreign-call");
+  expect(own.content).not.toContain("repo=");
+  expect(foreign.content).toBe("No evidence");
+});
+
+test.each([{ corrected: false }, { corrected: true }])("rejection evidence keeps its operation owner after a session move (corrected: $corrected)", async ({ corrected }) => {
+  const pa = await plugin(a);
+  const pb = await plugin(b);
+  const rejected = "the production service retains audit records for 30 days before cleanup";
+  await tombstone(rejected, { reason: "wrong retention policy", source: "forget" });
+  rememberSessionDir("writer", a);
+  setCurrent({ sessionID: "writer", callID: "rejection-call", tool: "memory_remember" });
+  const moved = moveDuringGate(pa);
+  const outcome = await runWriteGate({ ...fields, content: corrected ? rejected.replace("30", "90") : rejected }, {
+    sessionID: "writer", liveRoot: a, evidenceCalls: [], hasGateCheck: false,
+  });
+  expect(moved()).toBe(true);
+  expect(outcome.action).toBe(corrected ? "promoted" : "blocked");
+  if (outcome.action === "blocked") expect(outcome.reason).toBe("previously_rejected");
+  const event = corrected ? "rejection_vetoed" : "dedup_rejected";
+  const own = await pa.tools.memory_evidence.execute({ ev: event }, ctx("rejection-reader-a"));
+  const foreign = await pb.tools.memory_evidence.execute({ ev: event }, ctx("rejection-reader-b"));
+  expect(own.content).toContain(outcome.chain);
+  expect(own.content).toContain("call=rejection-call");
+  expect(foreign.content).not.toContain(outcome.chain);
+});
+
+test("ambient evidence captures its scope without adding suppressed session fields", async () => {
+  const pa = await plugin(a);
+  const pb = await plugin(b);
+  resetState();
+  setRepoScope(resolveRepo(a));
+  const captured = evidence.captureEvidenceContext();
+  setRepoScope(resolveRepo(b));
+  await evidence.record("ambient_probe", {}, false, undefined, captured);
+  const own = await pa.tools.memory_evidence.execute({ ev: "ambient_probe" }, ctx("ambient-reader-a"));
+  const foreign = await pb.tools.memory_evidence.execute({ ev: "ambient_probe" }, ctx("ambient-reader-b"));
+  expect(own.content).toContain("ev=ambient_probe");
+  expect(own.content).not.toContain("sid=");
+  expect(foreign.content).toBe("No evidence");
 });

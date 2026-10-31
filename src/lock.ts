@@ -48,18 +48,20 @@ export interface LockOptions {
   /**
    * What waiting past `timeoutMs` means. "fail" refuses the mutation (for
    * callers where proceeding unlocked could destroy more than it saves, e.g.
-   * snapshot restore). "proceed" runs it anyway: strictly no worse than the
-   * pre-lock behaviour, and it never costs a user their write.
+   * snapshot restore). The legacy default, "proceed", runs it unlocked and
+   * can lose acknowledged writes when another caller rewrites the same file.
+   * Store writers must use LOCK_WRITE (or an explicit fail-closed policy).
    */
   onTimeout?: "proceed" | "fail";
   onEvent?: (event: LockEvent, waitedMs: number) => void;
 }
 
-// How each store caller treats contention. An ordinary write PROCEEDS past the
-// timeout rather than lose the user's memory, and the wait is audited; restore
-// fails closed, because "force" drops rows and must not guess under a racing
-// writer.
+// Every writer of a shared store file must respect exclusion, INCLUDING
+// appenders: an unlocked append inside a holder's read-modify-write window is
+// overwritten by its publish. Refuse at the deadline so the caller can retry;
+// never acknowledge a mutation performed outside the holder's lock (#196).
 export const LOCK_WRITE: LockOptions = {
+  onTimeout: "fail",
   onEvent: (event, waitedMs) => {
     void record("store_lock", { event, waited_ms: waitedMs, op: "write" });
   },

@@ -200,6 +200,10 @@ export const EditBody = z.object({
 export const DeleteBody = z.object({ ts: isoTs, reason: z.string() });
 export const BlockBody = z.object({ ts: isoTs, reason: z.string() });
 export const UnblockBody = z.object({ ts: isoTs });
+// #35: lift a value-keyed rejection. `ch` is the 12-hex content hash the gate's
+// block hint names, and the same identifier a `dedup_rejected` evidence line
+// carries — so a human can act on either without reading the store by hand.
+export const UnrejectBody = z.object({ ch: z.string().regex(/^[0-9a-f]{12}$/) });
 // Strict fields by intent: String(body.x ?? "") coercion once let unvalidated
 // POSTs append rows with empty type/scope/content.
 // repo/repoPath (#129): the origin stamp of the DELETED row, replayed from the
