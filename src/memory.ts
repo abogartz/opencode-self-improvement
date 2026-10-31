@@ -399,8 +399,8 @@ async function stampRow(
 
 // Mark an existing memory as superseded IN PLACE (entry retained, recoverable).
 // Idempotent: a second call is a no-op, so no double `superseded_by`.
-export async function markSuperseded(ts: string, fields: SupersedeFields): Promise<boolean> {
-  return (await markManySupersededReport([{ ts, fields }])).marked.length > 0;
+export async function markSuperseded(ts: string, fields: SupersedeFields, durable?: string[]): Promise<boolean> {
+  return (await markManySupersededReport([{ ts, fields }], durable)).marked.length > 0;
 }
 
 // Batch supersession (#61): one lock acquisition, one read, one snapshot and
@@ -412,8 +412,8 @@ export async function markSuperseded(ts: string, fields: SupersedeFields): Promi
 // so a repeat run marks nothing and writes nothing. Duplicate ts entries in
 // one batch: the FIRST entry's fields win (mirrors row-by-row first-call-wins).
 // Returns the number of rows actually marked.
-export async function markManySuperseded(entries: { ts: string; fields: SupersedeFields }[]): Promise<number> {
-  return (await markManySupersededReport(entries)).marked.length;
+export async function markManySuperseded(entries: { ts: string; fields: SupersedeFields }[], durable?: string[]): Promise<number> {
+  return (await markManySupersededReport(entries, durable)).marked.length;
 }
 
 // Same operation, reporting WHICH rows retired rather than how many (#158
@@ -424,6 +424,9 @@ export async function markManySuperseded(entries: { ts: string; fields: Supersed
 // this call did not perform.
 export async function markManySupersededReport(
   entries: { ts: string; fields: SupersedeFields }[],
+  // Updated immediately after EACH publish, even if a later file refuses its
+  // lock or lock cleanup throws. A rejected promise is not a rollback.
+  durable?: string[],
 ): Promise<{ marked: string[] }> {
   if (entries.length === 0) return { marked: [] };
   const wanted = new Map<string, SupersedeFields>();
@@ -464,6 +467,7 @@ export async function markManySupersededReport(
           if (ids.length === 0) return [];
           await snapshotBefore(file);
           await writeAtomic(file, lines.join("\n") + "\n", since);
+          durable?.push(...ids);
           return ids;
         },
         LOCK_WRITE,
@@ -623,9 +627,9 @@ export async function prune(
   type: string,
   reason: string,
   reader: Reader = readerForAmbient(),
+  durable: PruneResult = { deleted: [], snapshot: [] },
 ): Promise<PruneResult> {
-  const deleted: DeletedMemory[] = [];
-  const snapshot: string[] = [];
+  const { deleted, snapshot } = durable;
   for (const file of await memoryFiles()) {
     await withStoreLock(
       file,
@@ -633,6 +637,7 @@ export async function prune(
         const since = await fileIdentity(file);
         const lines = await readLines(file);
         const kept: string[] = [];
+        const fileDeleted: DeletedMemory[] = [];
         let changed = false;
         for (const line of lines) {
           const parsed = parseLine(line);
@@ -641,7 +646,7 @@ export async function prune(
           // another repo's row for scope X — same basename collisions are real
           // (a fork next to its upstream).
           if (m && m.scope === scope && m.type === type && isVisibleTo(m, reader)) {
-            deleted.push({ memory: m, reason });
+            fileDeleted.push({ memory: m, reason });
             await logDeletion(m, reason);
             changed = true;
             continue;
@@ -651,6 +656,7 @@ export async function prune(
         if (!changed) return;
         snapshot.push(...(await snapshotFiles([file])));
         await writeAtomic(file, kept.join("\n") + (kept.length ? "\n" : ""), since);
+        deleted.push(...fileDeleted);
       },
       LOCK_WRITE,
     );

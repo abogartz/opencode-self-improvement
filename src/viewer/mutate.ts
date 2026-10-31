@@ -90,10 +90,15 @@ export async function editMemory(input: EditInput): Promise<MutationResult> {
     repo: target.repo ?? "global",
     repoPath: target.repo ? target.repoPath : undefined,
   });
-  await markSuperseded(input.ts, {
-    superseded_by: newTs,
-    reason: "human_edit",
-  });
+  const retired: string[] = [];
+  try {
+    await markSuperseded(input.ts, {
+      superseded_by: newTs,
+      reason: "human_edit",
+    }, retired);
+  } catch (err) {
+    throw new Error(`viewer edit PARTIAL: replacement ${newTs} IS on disk; original ${input.ts} ${retired.includes(input.ts) ? "IS retired" : "was NOT retired by this edit"}. Stopped: ${String(err)}. Inspect the rows or use memory_undo before retrying.`);
+  }
   await audit("edited", target, input.ts, newTs, input.reason);
   await record("viewer_edit", {
     chain,
