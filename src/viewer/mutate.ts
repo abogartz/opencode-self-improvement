@@ -8,7 +8,8 @@
 // All mutations require a reason and write audit + evidence lines.
 import { deletionsFile } from "../config.ts";
 import { addBlock, removeBlock } from "../blocklist.ts";
-import { record, chainId } from "../evidence.ts";
+import { record, chainId, contentHash } from "../evidence.ts";
+import { removeTombstone, tombstone } from "../tombstones.ts";
 import { redactSecrets } from "../secrets.ts";
 import { appendLog, fileIdentity, formatLine, parseLine, readLines, writeAtomic } from "../logfmt.ts";
 import { withStoreLock, LOCK_WRITE } from "../lock.ts";
@@ -89,10 +90,15 @@ export async function editMemory(input: EditInput): Promise<MutationResult> {
     repo: target.repo ?? "global",
     repoPath: target.repo ? target.repoPath : undefined,
   });
-  await markSuperseded(input.ts, {
-    superseded_by: newTs,
-    reason: "human_edit",
-  });
+  const retired: string[] = [];
+  try {
+    await markSuperseded(input.ts, {
+      superseded_by: newTs,
+      reason: "human_edit",
+    }, retired);
+  } catch (err) {
+    throw new Error(`viewer edit PARTIAL: replacement ${newTs} IS on disk; original ${input.ts} ${retired.includes(input.ts) ? "IS retired" : "was NOT retired by this edit"}. Stopped: ${String(err)}. Inspect the rows or use memory_undo before retrying.`);
+  }
   await audit("edited", target, input.ts, newTs, input.reason);
   await record("viewer_edit", {
     chain,
@@ -186,6 +192,45 @@ async function audit(
       reason: redactSecrets(reason),
     }),
   );
+}
+
+// Blocking is a human rejection, so it tombstones the VALUE as well as hiding
+// the row (#35): without that, re-ingesting the source stores the same content
+// again under a fresh `ts` and the block silently stops protecting anything.
+// Order matters — the block is what the operator asked for and lands first; a
+// failure to tombstone leaves the row hidden (no data loss) rather than the
+// reverse (row visible, rejection half-applied).
+export async function blockMemory(input: { ts: string; reason: string }): Promise<string> {
+  requireReason(input.reason);
+  const mem = await findMemory(input.ts);
+  await addBlock(input.ts, input.reason);
+  await tombstone(mem.content, {
+    reason: redactSecrets(input.reason),
+    source: "block",
+    scope: mem.scope,
+    type: mem.type,
+  });
+  return input.ts;
+}
+
+// Un-blocking withdraws the rejection, so it lifts the tombstone too — leaving
+// it would mean the value stays refused while the row it was refused on is
+// back in view. The tombstone is keyed on the value, so this withdraws the
+// rejection of that content wherever else a copy of it was blocked; that is the
+// same decision the tombstone made when it was written.
+export async function unblockMemory(ts: string): Promise<boolean> {
+  const removed = await removeBlock(ts);
+  const mem = (await loadAll()).find((x) => x.ts === ts);
+  if (mem) await removeTombstone(contentHash(mem.content));
+  return removed;
+}
+
+// The explicit un-tombstone escape hatch (#35): lifts a rejection recorded by
+// `forget`, which has no row left to un-block. Human-only — this is reachable
+// from the viewer and deliberately from NO plugin tool, so a session whose
+// write was refused cannot clear its own refusal and retry in the same turn.
+export async function unrejectMemory(ch: string): Promise<boolean> {
+  return removeTombstone(ch);
 }
 
 export { addBlock, removeBlock };

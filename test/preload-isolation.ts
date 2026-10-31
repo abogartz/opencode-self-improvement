@@ -11,11 +11,19 @@
 // file that needs identity sets it in its own beforeEach (or per test), which
 // is what the existing suites already do; nothing may rely on identity
 // surviving a test boundary.
+//
+// The rejection tombstone cache (#35) joins them for the same reason: it is a
+// module global keyed on the tombstone file's change token, and every test file
+// points OPENCODE_MEMORY_DIR at a different temp store. It is invalidated on
+// every write, so this is belt-and-braces against a verdict surviving a store
+// that no longer exists.
 import { afterEach } from "bun:test";
 import { resetSessionScopes } from "../src/repokey.ts";
 import { resetState } from "../src/state.ts";
+import { resetTombstoneCache } from "../src/tombstones.ts";
 
 afterEach(() => {
   resetState();
   resetSessionScopes();
+  resetTombstoneCache();
 });

@@ -124,13 +124,10 @@ let tmpSeq = 0;
 
 export async function writeAtomic(file: string, content: string, since?: string): Promise<void> {
   await ensureDir(dirname(file));
-  // Unique PER CALL, not per process: the store lock guarantees one writer
-  // only until a starved waiter's budget expires and lock.ts lets it proceed
-  // anyway. That degraded writer can be inside writeAtomic for the same file
-  // at the same instant - with a pid-stable name its bytes would sit in the
-  // very temp the anchored publish's ≤2s retry keeps renaming, and the retry
-  // would publish THOSE bytes under our success report. One extra leftover
-  // per failed attempt is the (unlinkable) price of that safety.
+  // Unique PER CALL, not per process: shared store writers now fail closed on
+  // lock timeout, but direct/legacy callers can still overlap. A pid-stable
+  // name would let one call replace the bytes another call's anchored publish
+  // is retrying. Keep separate temps even when the caller holds a lock.
   const tmp = `${file}.${process.pid}.${++tmpSeq}.tmp`;
   try {
     await Bun.write(tmp, content);
@@ -147,8 +144,8 @@ export async function writeAtomic(file: string, content: string, since?: string)
 // while that handle lives. Readers of a small store file cycle their handle on
 // a microsecond scale, so that failure is usually transient and worth a retry
 // window (~2s, well inside the 5s lock budget) — but a retry alone is not safe
-// here. If an unlocked writer (a starved lock waiter runs its write anyway;
-// see lock.ts onTimeout) appends into the destination DURING the window, the
+// here. If an out-of-band or legacy unlocked writer appends into the
+// destination DURING the window, the
 // retried rename publishes our now-stale copy over that row — a slower way to
 // lose exactly what the immediate failure preserved. So the retry runs only
 // while the destination still matches `since`, the identity from before the

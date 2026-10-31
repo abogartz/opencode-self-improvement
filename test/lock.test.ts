@@ -215,25 +215,57 @@ describe.skipIf(process.platform !== "win32")("broken store directory (Windows A
     // lock file is provably absent every probe, so the strike rule must
     // surface the live EPERM in tens of ms — not decay into the budget
     // timeout, whose "proceed" would run the write with no lock anywhere.
-    const dir = tmp();
-    const store = join(dir, "memory");
-    mkdirSync(store);
+    // Emit starts too: an outer timeout can kill the worker before a phase
+    // finishes. Log phase names/durations only, never usernames or temp paths.
+    const startPhase = (phase: string) => {
+      console.info(`[acl-fixture] ${JSON.stringify({ phase, event: "start" })}`);
+      const started = performance.now();
+      return (exitCode?: number) => console.info(`[acl-fixture] ${JSON.stringify({
+        phase, event: "end", elapsedMs: Math.round(performance.now() - started),
+        exitCode: exitCode ?? null,
+      })}`);
+    };
+    const measure = <T,>(phase: string, fn: () => T): T => {
+      const end = startPhase(phase);
+      let exitCode: number | undefined;
+      try {
+        const result = fn();
+        if (result && typeof result === "object" && "exitCode" in result && typeof result.exitCode === "number") {
+          exitCode = result.exitCode;
+        }
+        return result;
+      } finally { end(exitCode); }
+    };
+    const store = measure("setup", () => {
+      const dir = tmp();
+      const path = join(dir, "memory");
+      mkdirSync(path);
+      return path;
+    });
     const file = join(store, "a.logfmt");
-    const me = Bun.spawnSync(["whoami"], { stdout: "pipe" }).stdout?.toString().trim() ?? "";
+    const me = measure("identity", () => Bun.spawnSync(["whoami"], { stdout: "pipe" })).stdout?.toString().trim() ?? "";
     const icacls = (args: string[]) =>
       Bun.spawnSync(["icacls", store, ...args], { stdout: "pipe", stderr: "pipe" });
-    const deny = icacls(["/deny", `${me}:(WD)`]);
-    if (deny.exitCode !== 0) return; // runner cannot manage ACLs: skip rather than misclaim
+    const deny = measure("acl-deny", () => icacls(["/deny", `${me}:(WD)`]));
+    if (deny.exitCode !== 0) {
+      console.info('[acl-fixture] {"event":"not-exercised","reason":"acl-deny-failed"}');
+      return;
+    }
     try {
       let denied = false;
       try {
-        writeFileSync(join(store, "probe.txt"), "x");
+        measure("deny-probe", () => writeFileSync(join(store, "probe.txt"), "x"));
       } catch {
         denied = true;
       }
-      if (!denied) return; // the denial did not stick on this runner
+      if (!denied) {
+        console.info('[acl-fixture] {"event":"not-exercised","reason":"denial-not-effective"}');
+        return;
+      }
       let ran = false;
+      const endLock = startPhase("lock");
       const t0 = Date.now();
+      let lockMs = 0;
       let failed = false;
       let message = "";
       try {
@@ -248,13 +280,16 @@ describe.skipIf(process.platform !== "win32")("broken store directory (Windows A
       } catch (e) {
         failed = true;
         message = String((e as Error).message ?? e);
+      } finally {
+        lockMs = Date.now() - t0;
+        endLock();
       }
       expect(ran).toBe(false);
       expect(failed).toBe(true);
-      expect(Date.now() - t0).toBeLessThan(2000);
+      expect(lockMs).toBeLessThan(2000);
       expect(message).toMatch(/EPERM|EACCES|permission/i);
     } finally {
-      icacls(["/remove:d", me]);
+      measure("acl-restore", () => icacls(["/remove:d", me]));
     }
     // The outer budget includes whoami and ACL setup/cleanup subprocesses on
     // shared Windows runners. The lock itself must still fail within 2s above.

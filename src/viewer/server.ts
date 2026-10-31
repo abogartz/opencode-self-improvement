@@ -7,13 +7,14 @@
 import { basename, join } from "node:path";
 import { serve, type Server } from "bun";
 import { z, type ZodTypeAny } from "zod";
-import { BlockBody, DeleteBody, EditBody, RestoreEntryBody, UnblockBody } from "../schema.ts";
+import { BlockBody, DeleteBody, EditBody, RestoreEntryBody, UnblockBody, UnrejectBody } from "../schema.ts";
 import { deletionsFile, memoryRoot, snapshotDir } from "../config.ts";
 import { blockedEntries } from "../blocklist.ts";
 import { listSnapshots, restoreSnapshot } from "../undo.ts";
 import { appendMemory, loadAll, memoryFiles } from "../memory.ts";
 import { parseLine, readLines } from "../logfmt.ts";
-import { deleteMemory, editMemory, addBlock, removeBlock, type MutationResult } from "./mutate.ts";
+import { deleteMemory, editMemory, blockMemory, unblockMemory, unrejectMemory, type MutationResult } from "./mutate.ts";
+import { tombstones } from "../tombstones.ts";
 
 const PAGE = join(import.meta.dir, "page.html");
 const HOST = process.env.OPENCODE_VIEWER_HOST || "127.0.0.1";
@@ -174,11 +175,12 @@ export async function startViewer(port: number = PORT): Promise<ViewerServer> {
 }
 
 async function loaded(): Promise<Record<string, unknown>> {
-  const [memories, blocked, deleted, snaps] = await Promise.all([
+  const [memories, blocked, deleted, snaps, rejections] = await Promise.all([
     loadAll(),
     blockedRows(),
     deletedRows(),
     listSnapshots(),
+    tombstones(),
   ]);
   const blockedByTs = new Set(blocked.map((b) => b.ts));
   return {
@@ -200,6 +202,18 @@ async function loaded(): Promise<Record<string, unknown>> {
     })),
     blocked,
     deleted,
+    // #35: the value-keyed rejections. Hashes and metadata only — the store
+    // never held the prose, so there is nothing to reveal here either. The
+    // sketch is omitted: it is matching machinery, not something a reader can
+    // act on.
+    rejections: rejections.map((t) => ({
+      ch: t.ch,
+      reason: t.reason,
+      source: t.source,
+      scope: t.scope ?? "",
+      type: t.type ?? "",
+      rejected_at: t.rejected_at,
+    })),
     snapshots: snaps.map((s) => ({ name: s.name, bytes: s.bytes })),
   };
 }
@@ -211,6 +225,7 @@ async function route(req: Request, url: URL): Promise<Response> {
     if (url.pathname === "/api/delete") return parseWith(DeleteBody, body, deleteRoute);
     if (url.pathname === "/api/block") return parseWith(BlockBody, body, blockRoute);
     if (url.pathname === "/api/unblock") return parseWith(UnblockBody, body, unblockRoute);
+    if (url.pathname === "/api/unreject") return parseWith(UnrejectBody, body, unrejectRoute);
     if (url.pathname === "/api/restore-entry") return parseWith(RestoreEntryBody, body, restoreEntryRoute);
     // /api/restore is deliberately NOT schema-parsed here: its name check is
     // basename + pinned-grammar CONTAINMENT, not a shape gate,
@@ -258,11 +273,18 @@ async function deleteRoute(body: z.infer<typeof DeleteBody>): Promise<Response> 
 }
 
 async function blockRoute(body: z.infer<typeof BlockBody>): Promise<Response> {
-  return json({ ts: await addBlock(body.ts, body.reason) });
+  return json({ ts: await blockMemory(body) });
 }
 
 async function unblockRoute(body: z.infer<typeof UnblockBody>): Promise<Response> {
-  return json({ unblocked: await removeBlock(body.ts) });
+  return json({ unblocked: await unblockMemory(body.ts) });
+}
+
+// The only way a rejection is ever lifted (#35). Human-only: the plugin exposes
+// no tool for this, so a session whose write was refused cannot clear the
+// refusal and re-submit the rejected value.
+async function unrejectRoute(body: z.infer<typeof UnrejectBody>): Promise<Response> {
+  return json({ unrejected: await unrejectMemory(body.ch) });
 }
 
 async function restoreEntryRoute(body: z.infer<typeof RestoreEntryBody>): Promise<Response> {

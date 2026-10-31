@@ -170,10 +170,13 @@ describe("a force restore between two remembers", () => {
 });
 
 describe("a forgotten value re-entering through import", () => {
-	// Pins CURRENT policy: nothing is keyed on a rejected or forgotten value, so
-	// re-ingestion stores it again. The tombstone work makes this table flip
-	// (row absent, tally blocked) — that flip is the ticket's acceptance diff.
-	test("import lands the value again as a fresh row", async () => {
+	// #35 FLIPPED this table. It used to pin the opposite policy: nothing was
+	// keyed on a rejected or forgotten value, so re-ingestion stored it again as
+	// a fresh row, and the comment here said the tombstone work would flip it to
+	// "row absent, tally blocked". That is what now happens — the rejection is
+	// keyed on the VALUE, so a replay through import is refused even though the
+	// row that held it is gone and its `ts` no longer exists anywhere.
+	test("import refuses the forgotten value instead of re-storing it (#35)", async () => {
 		s = await startScripted();
 		const s1 = s.session("s1");
 		await s1.engage();
@@ -208,8 +211,9 @@ describe("a forgotten value re-entering through import", () => {
 		};
 		const tally = await importMemories(file, (c) => runWriteGate(c, gateCtx));
 
-		expect(tally.promoted).toBe(1);
-		s.expectActive([{ type: "learning", scope: "release", content: forgotten }]);
+		expect(tally.promoted).toBe(0);
+		expect(tally.blocked).toBe(1);
+		s.expectActive([]);
 		s.conservation();
 	});
 });

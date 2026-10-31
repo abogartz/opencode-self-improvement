@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { dateStr, evidenceDir } from "./config.ts";
 import { appendLog, formatLine } from "./logfmt.ts";
-import { repoScope, sessionScope } from "./repokey.ts";
+import { repoScope, sessionScope, type RepoScope } from "./repokey.ts";
 import { getCurrent } from "./state.ts";
 import { redactSecrets } from "./secrets.ts";
 
@@ -55,20 +55,27 @@ function scrubFields(fields: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-export async function record(
-  ev: EvidenceEvent,
-  fields: Record<string, unknown> = {},
-  includeContext = true,
-  sessionID?: string,
-): Promise<void> {
+// Immutable operation attribution, captured before the caller's first await.
+// Null scope is significant: a named-unresolved session must stay private.
+export interface EvidenceContext {
+  readonly sid: string;
+  readonly call: string | undefined;
+  readonly scope: Readonly<RepoScope> | null;
+}
+
+export function captureEvidenceContext(sessionID?: string): EvidenceContext {
   const cur = getCurrent();
   // An explicitly threaded session outranks the ambient one: gate-authored
   // lines must name the session the gate runs FOR, not whichever setCurrent
   // fired last during the gate's own awaits (#118 review note 1 — the rows
   // were fixed in #118, these lines were the residue). When the two disagree,
   // the ambient call belongs to the OTHER session's flow, so it is dropped
-  // rather than borrowed. With sessionID undefined (tool paths — issue #121)
-  // this is exactly the old ambient read.
+  // rather than borrowed. With sessionID undefined this captures the ambient
+  // session and call at entry by design (maintenance/direct callers). An
+  // explicit "?" keeps the ambient call only when cur.sid is also "?";
+  // otherwise it stays absent, even if a later setCurrent supplies a call.
+  // Normal tool hooks setCurrent before execute; this snapshot never guesses
+  // a missing operation call from a later hook. See #121 for identity context.
   const sid = sessionID ?? cur.sid;
   const call = sessionID !== undefined && sessionID !== cur.sid ? undefined : cur.call;
   // Read-side partitioning of the shared log (#131's rule, applied to
@@ -85,6 +92,17 @@ export async function record(
   // scope-less process) keep their historical global reading.
   const named = typeof sid === "string" && sid !== "" && sid !== "?";
   const scope = named ? sessionScope(sid) : repoScope();
+  return Object.freeze({ sid, call, scope: scope ? Object.freeze({ ...scope }) : null });
+}
+
+export async function record(
+  ev: EvidenceEvent,
+  fields: Record<string, unknown> = {},
+  includeContext = true,
+  sessionID?: string,
+  context?: EvidenceContext,
+): Promise<void> {
+  const { sid, call, scope } = context ?? captureEvidenceContext(sessionID);
   const line = formatLine({
     ev,
     ts: new Date().toISOString(),
@@ -135,6 +153,7 @@ export async function recordWriteBlocked(
   flags: string[],
   chain?: string,
   sessionID?: string,
+  context?: EvidenceContext,
 ): Promise<void> {
   await record(
     "write_blocked",
@@ -146,5 +165,6 @@ export async function recordWriteBlocked(
     },
     true,
     sessionID,
+    context,
   );
 }
