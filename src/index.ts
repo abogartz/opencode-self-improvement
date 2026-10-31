@@ -220,6 +220,8 @@ export function resetCaptureCooldowns(): void {
 // test/event-fidelity.test.ts requires every trigger to appear in both that
 // recording and the installed @opencode/schema manifest: a declared event
 // alone is insufficient evidence that the host emits it (#78, #136).
+// Identity triggers have a separate observed check in that test, combining
+// this recording with the 2.2.2 move extract in host-session-move.json (#176).
 export const TURN_END_EVENTS = ["session.execution.succeeded", "session.execution.interrupted"] as const;
 
 /** Every event type the capture subscription reacts to (fidelity-tested). */
