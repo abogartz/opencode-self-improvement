@@ -345,7 +345,7 @@ describe("re-ingestion after prune / block", () => {
   // the rejection with it: the same content replayed through the gate lands as
   // a fresh promoted row. #35 makes rejections keyed on the VALUE, at which
   // point un-skip this test — it must turn green without being edited.
-  test.skip("pruned content stays rejected when replayed through the gate (#35)", async () => {
+  test("pruned content stays rejected when replayed through the gate (#35)", async () => {
     const candidate = { type: "learning" as const, scope: "prune", content: RIVAL };
     const ctx = { liveRoot: root, evidenceCalls: [], hasGateCheck: true, hasEngagement: true };
     const first = await runWriteGate(candidate, ctx);

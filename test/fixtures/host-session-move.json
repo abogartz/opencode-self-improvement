@@ -1,0 +1,33 @@
+{
+  "provenance": {
+    "host": "opencode v2.2.2",
+    "platform": "Windows",
+    "recordedAt": "2026-10-30",
+    "transport": "GET /api/event (SSE)",
+    "procedure": [
+      "Start serve --service with fresh HOME, XDG config/data/state/cache, and memory directories; no plugin or model prompt.",
+      "Subscribe to GET /api/event before creating the session.",
+      "POST /api/session with location.directory=A; response 200.",
+      "POST /api/session/:sessionID/move with directory=B; response 204.",
+      "Observe session.moved below; GET /api/session/:sessionID confirms location.directory=B."
+    ],
+    "normalization": "Event/session IDs and temporary directories replaced with stable placeholders; envelope fields and nesting retained. Other frames from the run were dropped; only the session.moved frame under test is retained.",
+    "limits": "One move on 2.2.2, separate from the 2.1.4 two-turn recording in host-events.jsonl. Does not establish behavior on every supported host version or live plugin rebinding.",
+    "reference": "https://github.com/abogartz/opencode-self-improvement/issues/176#issuecomment-6530557879"
+  },
+  "events": [
+    {
+      "id": "evt_recorded_move",
+      "created": 1793385093773,
+      "type": "session.moved",
+      "location": { "directory": "/recording/repo-a" },
+      "data": {
+        "sessionID": "ses_recorded_move",
+        "location": { "directory": "/recording/repo-b" },
+        "projectID": "global",
+        "subpath": ""
+      },
+      "durable": { "aggregateID": "ses_recorded_move", "seq": 4, "version": 1 }
+    }
+  ]
+}
