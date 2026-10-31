@@ -7,16 +7,18 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { requireTempPath } from "./helpers/temp-root.ts";
+import { pathToFileURL } from "node:url";
 
 describe("requireTempPath", () => {
   test("accepts a path under the system temp dir, whatever the separator", () => {
     const root = mkdtempSync(join(tmpdir(), "osi-guard-"));
     try {
-      // A rejected path calls process.exit(2) — if the comparison is wrong
-      // for this platform, this line ends the whole test process.
-      requireTempPath(join(root, "memory"), "probe");
-      expect(true).toBe(true);
+      // Observe exit(2) as a test failure, not an aborted suite with no verdict.
+      const helper = pathToFileURL(join(import.meta.dir, "helpers", "temp-root.ts")).href;
+      const code = `import { requireTempPath } from ${JSON.stringify(helper)}; requireTempPath(${JSON.stringify(join(root, "memory"))}, "probe");`;
+      const child = Bun.spawnSync([process.execPath, "-e", code], { stdout: "pipe", stderr: "pipe" });
+      expect(child.exitCode).toBe(0);
+      expect(child.stderr.toString()).toBe("");
     } finally {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }

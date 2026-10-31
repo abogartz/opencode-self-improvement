@@ -82,13 +82,16 @@ describe("non-git repo keys are bare tokens (#92)", () => {
       expect(base).toBe(resolveRepo(`${dir}${process.platform === "win32" ? "\\" : "/"}`).key); // trailing sep
       // Symlink/junction alias (junctions need no privileges on Windows):
       const link = join(root, "alias-link");
+      let linked = false;
       try {
         symlinkSync(dir, link, process.platform === "win32" ? "junction" : "dir");
-        expect(resolveRepo(link).key).toBe(base);
+        linked = true;
       } catch {
         // filesystem refused the link (unprivileged Linux in a container) - spelling
         // variants above still pin the normalizer.
       }
+      // An unavailable link can be skipped; a failed equality cannot.
+      if (linked) expect(resolveRepo(link).key).toBe(base);
       if (process.platform === "win32" || process.platform === "darwin") {
         // case-insensitive filesystems must fold: same dir, other case, same key
         const flipped = resolveRepo(/[A-Z]/.test(dir) ? dir.replace(/[A-Z]/, (c) => c.toLowerCase()) : dir.replace(/[a-z]/, (c) => c.toUpperCase()));
@@ -117,7 +120,7 @@ describe("non-git repo keys are bare tokens (#92)", () => {
     const dir = mkdtempSync(join(tmpdir(), "osi-repokey norm-"));
     const n = normalizeDirPath(dir);
     expect(n).not.toMatch(/\\/);
-    expect(n.endsWith("/") ? n.length > 1 : true).toBe(true);
+    expect(n.endsWith("/")).toBe(false); // this fixture is a child directory, never a filesystem root
     if (process.platform === "win32" || process.platform === "darwin") expect(n).toBe(n.toLowerCase());
     expect(normalizeDirPath(n + (process.platform === "win32" ? "\\" : "/"))).toBe(n);
   });

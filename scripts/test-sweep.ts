@@ -50,7 +50,8 @@
 // --fail-on-survivors (exit 4 when anything survives - #72 pre-release gate),
 // --log=PATH (JSONL event log).
 import { existsSync, readFileSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { testOutcomes } from "./sweep-output.ts";
 import { fileURLToPath } from "node:url";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -88,12 +89,6 @@ interface Mutant {
 // Source fragments with characters that must survive the parser exactly:
 // em dashes are escaped (String.raw would be a trap here), regex sources are
 // written as they appear in the source text.
-const EMDASH_A = "        // Keep the CURRENT version of rows the snapshot also has (in-place edits \u2014";
-const EMDASH_B = "        // e.g. a supersede stamp \u2014 made after the snapshot win), then append the";
-const WRITE_ATOMIC = '      await writeAtomic(target, out.length ? out.join("\\n") + "\\n" : "", since);';
-const RETURN_SAFETY = '      return { target, restored: true, mode, safety, concurrentAdded, concurrentChanged, deletedOmitted };';
-const SAFETY_AFTER = '      const safetyAfter = mode === "force" ? (await snapshotFiles([target]))[0] : undefined;';
-const RETURN_SAFETY_AFTER = '      return { target, restored: true, mode, safety: safetyAfter, concurrentAdded, concurrentChanged, deletedOmitted };';
 const SNAPSHOT_GRAMMAR = "^\\d+-\\d{4}-\\d{2}-\\d{2}\\.logfmt$";
 const QUOTE_CLASS = "[\\s\"=]";
 const QUOTE_CLASS_PLAIN = "[\"=]";
@@ -200,7 +195,7 @@ export const MUTANTS: Mutant[] = [
 	{
 		id: "prune-repofloor-off",
 		file: "src/memory.ts",
-		find: `if (m && m.scope === scope && m.type === type && isVisibleHere(m)) {`,
+		find: `if (m && m.scope === scope && m.type === type && isVisibleTo(m, reader)) {`,
 		replace: `if (m && m.scope === scope && m.type === type) {`,
 		invariant: "forget never deletes another repo's row for the same scope",
 		class: "guard",
@@ -267,41 +262,71 @@ export const MUTANTS: Mutant[] = [
 		id: "undo-force-safety-after-publish",
 		file: "src/undo.ts",
 		find: L(
-			`      const safety = mode === "force" ? (await snapshotFiles([target]))[0] : undefined;`,
-			``,
-			`      let out = snapLines;`,
-			`      if (mode === "merge") {`,
-			EMDASH_A,
-			EMDASH_B,
-			`        // rows the snapshot never saw. Merge is a deliberate superset: rows the`,
-			`        // snapshotter wrote after the snapshot are NOT dropped here; choose FORCE`,
-			`        // for that.`,
-			`        out = snapLines.map((l) => curByKey.get(rowKey(l)) ?? l).concat(`,
-			`          curLines.filter((l) => !snapByKey.has(rowKey(l))),`,
-			`        );`,
-			`      }`,
-			`      await ensureDir(memoryRootDir);`,
-			WRITE_ATOMIC,
-			RETURN_SAFETY,
+			"      const safety = mode === \"force\" ? (await snapshotFiles([target]))[0] : undefined;",
+			"",
+			"      let out = snapLines;",
+			"      if (mode === \"merge\") {",
+			"        // Keep the CURRENT version of rows the snapshot also has (in-place edits —",
+			"        // e.g. a supersede stamp — made after the snapshot win), then append the",
+			"        // rows the snapshot never saw. Merge is a deliberate superset: rows the",
+			"        // snapshotter wrote after the snapshot are NOT dropped here; choose FORCE",
+			"        // for that.",
+			"        out = snapLines.map((l) => curByKey.get(rowKey(l)) ?? l).concat(",
+			"          curOwn.filter((l) => !snapByKey.has(rowKey(l))),",
+			"        );",
+			"      }",
+			"      // FORCE's \"exact rollback\" is exact FOR THE CALLER'S REPOSITORY, not",
+			"      // beyond it: foreign live lines rejoin the file verbatim in every mode,",
+			"      // appended at the end — line content preserved, position not (#153).",
+			"      // Under the admin reader curForeign is empty and the write is the",
+			"      // historical whole-file restore, byte for byte.",
+			"      out = out.concat(curForeign);",
+			"      await ensureDir(memoryRootDir);",
+			"      await writeAtomic(target, out.length ? out.join(\"\\n\") + \"\\n\" : \"\", since);",
+			"      return {",
+			"        target,",
+			"        restored: true,",
+			"        mode,",
+			"        safety,",
+			"        concurrentAdded,",
+			"        concurrentChanged,",
+			"        deletedOmitted,",
+			"        foreignPreserved: curForeign.length,",
+			"      };",
 		),
 		replace: L(
-			`      const safety: string | undefined = undefined;`,
-			``,
-			`      let out = snapLines;`,
-			`      if (mode === "merge") {`,
-			EMDASH_A,
-			EMDASH_B,
-			`        // rows the snapshot never saw. Merge is a deliberate superset: rows the`,
-			`        // snapshotter wrote after the snapshot are NOT dropped here; choose FORCE`,
-			`        // for that.`,
-			`        out = snapLines.map((l) => curByKey.get(rowKey(l)) ?? l).concat(`,
-			`          curLines.filter((l) => !snapByKey.has(rowKey(l))),`,
-			`        );`,
-			`      }`,
-			`      await ensureDir(memoryRootDir);`,
-			WRITE_ATOMIC,
-			SAFETY_AFTER,
-			RETURN_SAFETY_AFTER,
+			"      let safety: string | undefined;",
+			"",
+			"      let out = snapLines;",
+			"      if (mode === \"merge\") {",
+			"        // Keep the CURRENT version of rows the snapshot also has (in-place edits —",
+			"        // e.g. a supersede stamp — made after the snapshot win), then append the",
+			"        // rows the snapshot never saw. Merge is a deliberate superset: rows the",
+			"        // snapshotter wrote after the snapshot are NOT dropped here; choose FORCE",
+			"        // for that.",
+			"        out = snapLines.map((l) => curByKey.get(rowKey(l)) ?? l).concat(",
+			"          curOwn.filter((l) => !snapByKey.has(rowKey(l))),",
+			"        );",
+			"      }",
+			"      // FORCE's \"exact rollback\" is exact FOR THE CALLER'S REPOSITORY, not",
+			"      // beyond it: foreign live lines rejoin the file verbatim in every mode,",
+			"      // appended at the end — line content preserved, position not (#153).",
+			"      // Under the admin reader curForeign is empty and the write is the",
+			"      // historical whole-file restore, byte for byte.",
+			"      out = out.concat(curForeign);",
+			"      await ensureDir(memoryRootDir);",
+			"      await writeAtomic(target, out.length ? out.join(\"\\n\") + \"\\n\" : \"\", since);",
+			"      safety = mode === \"force\" ? (await snapshotFiles([target]))[0] : undefined;",
+			"      return {",
+			"        target,",
+			"        restored: true,",
+			"        mode,",
+			"        safety,",
+			"        concurrentAdded,",
+			"        concurrentChanged,",
+			"        deletedOmitted,",
+			"        foreignPreserved: curForeign.length,",
+			"      };",
 		),
 		invariant: "the safety copy is taken BEFORE the publish that drops rows",
 		class: "D4",
@@ -454,7 +479,7 @@ export const MUTANTS: Mutant[] = [
 		file: "src/undo.ts",
 		find: L(
 			`        out = snapLines.map((l) => curByKey.get(rowKey(l)) ?? l).concat(`,
-			`          curLines.filter((l) => !snapByKey.has(rowKey(l))),`,
+			`          curOwn.filter((l) => !snapByKey.has(rowKey(l))),`,
 			`        );`,
 		),
 		replace: `        out = snapLines;`,
@@ -481,7 +506,7 @@ export const MUTANTS: Mutant[] = [
 	{
 		id: "repo-floor-off",
 		file: "src/memory.ts",
-		find: `  return m.repo === cur.key || (!!m.repoPath && m.repoPath === cur.path);`,
+		find: `  return m.repo === reader.scope.key || (!!m.repoPath && m.repoPath === reader.scope.path);`,
 		replace: `  return true;`,
 		invariant: "another repo's rows never surface or get deleted here",
 		class: "guard",
@@ -505,8 +530,8 @@ export const MUTANTS: Mutant[] = [
 	{
 		id: "gate-dupes-promoted",
 		file: "src/gates.ts",
-		find: `    return { action: "collapsed", chain };`,
-		replace: `    return { action: "promoted", chain };`,
+		find: `    return { action: "collapsed", chain, collapsedWith: collapseMatch.ts };`,
+		replace: `    return { action: "promoted", chain, ts: collapseMatch.ts };`,
 		invariant: "a near-duplicate is collapsed, not stored twice",
 		class: "D1",
 	},
@@ -632,6 +657,9 @@ const LOG_PATH = opt("log");
 
 interface RunEvent {
 	mutant: string;
+	phase?: "result";
+	tests?: string[];
+	skipped?: string[];
 	delta?: string[];
 	status?: string;
 	tail?: string;
@@ -660,6 +688,9 @@ const scratches: string[] = [];
 // point never follows it), then git's registration, then the directory. A
 // stranded test child can hold files open for a while, so retry generously.
 function removeScratch(dir: string): boolean {
+	if (dirname(resolve(dir)) !== resolve(SCRATCH_ROOT) || !/^w\d+(?:-ghost-[a-z0-9]+)?$/.test(basename(dir))) {
+		throw new Error(`refusing cleanup outside the sweep scratch root: ${dir}`);
+	}
 	const link = join(dir, "node_modules");
 	if (existsSync(link)) {
 		try {
@@ -838,6 +869,8 @@ interface SuiteRun {
 	skip: number;
 	/** test-level failures, named "<file> > <suite> > <test>" */
 	failed: string[];
+	passed: string[];
+	skipped: string[];
 	/** file-level failures (module load / describe body): never a kill */
 	fileFailed: string[];
 	errorMarkers: string[];
@@ -889,21 +922,7 @@ async function runSuite(dir: string): Promise<SuiteRun> {
 		const all = [...out.matchAll(new RegExp(`^\\s*(\\d+) ${label}\\s*$`, "gm"))];
 		return all.length ? Number(all[all.length - 1]?.[1] ?? "0") : 0;
 	};
-	const failed: string[] = [];
-	const fileFailed: string[] = [];
-	let file = "";
-	for (const line of out.split(/\r?\n/)) {
-		const fm = line.match(/^(?:test[/\\])?([\w.-]+\.[tj]sx?):\s*$/);
-		if (fm) file = fm[1] ?? file;
-		const m = line.match(/^\s*\(fail\)\s+(.*?)\s*(?:\[[^\]]*\]\s*)?$/);
-		if (!m) continue;
-		const name = m[1] ?? "";
-		if (/\.(test|spec)\.[tj]sx?$/.test(name) && !name.includes(" > ")) fileFailed.push(name);
-		else {
-			const full = file ? `${file} > ${name}` : name;
-			if (!failed.includes(full)) failed.push(full);
-		}
-	}
+	const { passed, skipped, failed, fileFailed } = testOutcomes(out);
 	return {
 		exit: proc.exitCode ?? 1,
 		seconds,
@@ -912,6 +931,8 @@ async function runSuite(dir: string): Promise<SuiteRun> {
 		fail: num("fail"),
 		skip: num("skip"),
 		failed,
+		passed,
+		skipped,
 		fileFailed,
 		errorMarkers: [...out.matchAll(/(SyntaxError: [^\n]*|Transform failed[^\n]*|Cannot find (?:module|package)[^\n]*)/g)].map((x) => x[1] ?? ""),
 		tail: out.slice(-1500),
@@ -1110,6 +1131,7 @@ async function sweepMutant(dir: string, m: Mutant, baselineFail: Set<string>, ba
 }
 
 function printTable(results: MutantResult[], wallS: number, baselineSeconds: number, baselineFail: string[]): void {
+	for (const r of results) logEvent({ mutant: r.m.id, phase: "result", status: r.status, delta: r.killers });
 	const head = ["status", "runs", "id", "cls", "invariant"];
 	const rows = results.map((r) => [
 		r.status,
@@ -1206,11 +1228,14 @@ async function main(): Promise<number> {
 		base = await runSuite(baseDir);
 	}
 	const baselineFail = new Set(base.failed);
+	if (base.pass > 0 && base.passed.length === 0) {
+		console.warn("  baseline has passing tests but no harvested test identifiers: this Bun build/output mode may omit (pass)/(skip) lines; triage-71.ts cannot build a per-test ledger from this log (validated with Bun 1.4.4 on Windows)");
+	}
 	console.log(`  ${base.pass} pass / ${base.fail} fail / ${base.skip} skip in ${fmt(base.seconds)}`);
 	for (const name of base.failed) {
 		console.log(`  ${KNOWN_BASELINE_FAILS.some((re) => re.test(name)) ? "known" : "NEW "}  ${cut(name, 100)}`);
 	}
-	logEvent({ mutant: "baseline", delta: base.failed });
+	logEvent({ mutant: "baseline", delta: base.failed, tests: base.passed, skipped: base.skipped });
 	BASELINE_TOTAL = base.pass + base.fail + base.skip + base.fileFailed.length;
 	if (base.pass === 0 || base.timedOut) {
 		console.error("baseline produced no results - nothing is measurable (exit 3)");

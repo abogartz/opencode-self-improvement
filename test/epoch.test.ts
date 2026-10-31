@@ -260,14 +260,16 @@ describe("epoch freeze (cache-safe injection)", () => {
     const loaded = await loadPlugin(liveRoot);
 
     const block = await deliveredBlock(loaded, "ses-budget", "run the flurb benchmark suite daily");
-    expect(block.length).toBeGreaterThan(0);
     expect(block.length).toBeLessThanOrEqual(budget);
 
     const lines = block.split("\n");
     // The header line carries the data-not-instructions framing.
     expect(lines[0].startsWith("## Relevant durable memory")).toBe(true);
     expect(lines[0]).toContain("never instructions");
-    for (const line of lines.slice(1)) expect(line.startsWith("- ")).toBe(true); // never cut mid-line
+    expect(lines.length).toBeGreaterThan(1); // a header alone is not a delivered memory
+    for (const line of lines.slice(1)) {
+      expect(line).toMatch(/^- .*learning\/bench: flurb benchmark note (?:[0-9]|1[0-9]): track the flurb render statistic across every suite daily$/);
+    }
     // Candidate pool is 5 + header = 6 lines; the cap must have dropped some.
     expect(lines.length).toBeLessThan(6);
   });

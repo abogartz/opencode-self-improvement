@@ -200,10 +200,15 @@ describe("memory-aware compaction anchor", () => {
 
     expect(output.system.length).toBe(1);
     const anchor = output.system[0];
-    expect(anchor.length).toBeGreaterThan(0);
     expect(anchor.length).toBeLessThanOrEqual(2500);
     for (const line of anchor.split("\n")) {
       expect(["##", "Pr", "- "].some((p) => line.startsWith(p))).toBe(true);
+    }
+    expect(anchor).toContain("## Durable memory to preserve in this summary");
+    const rows = anchor.split("\n").filter((line) => line.startsWith("- "));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row).toMatch(/^- .*learning\/bench: flurb benchmark note (?:[0-9]|[1-3][0-9]): x{200}$/);
     }
   });
 });

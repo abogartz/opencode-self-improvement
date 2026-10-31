@@ -74,11 +74,18 @@ describe("supersede racing appends", () => {
   test("a concurrent reader never sees a half-written file", async () => {
     const seeded = await seed(300);
     let observedPartial = 0;
+    let incompleteReads = 0;
     let reads = 0;
+    const expected = seeded.map((ts, i) => `${ts}|seed row ${i} ${"x".repeat(40)}`).sort();
     const reader = (async () => {
       for (let i = 0; i < 400; i++) {
         const lines = await rawLines();
         reads++;
+        const observed = lines.map((line) => {
+          const row = parseLine(line);
+          return `${row?.ts}|${row?.content}`;
+        }).sort();
+        if (JSON.stringify(observed) !== JSON.stringify(expected)) incompleteReads++;
         const malformed = lines.filter((l) => {
           const f = parseLine(l);
           return !f || typeof f.ts !== "string" || typeof f.content !== "string";
@@ -90,7 +97,9 @@ describe("supersede racing appends", () => {
       seeded.map((ts) => markSuperseded(ts, { superseded_by: "2026-01-02T00:00:00.000Z", reason: "drift" })),
     );
     await reader;
-    expect(reads).toBeGreaterThan(0);
+    // A parseable prefix (or an empty file) is still data loss.
+    expect(reads).toBe(400);
+    expect(incompleteReads).toBe(0);
     expect(observedPartial).toBe(0);
     expect(await rawLines()).toHaveLength(300);
   }, 30_000);
