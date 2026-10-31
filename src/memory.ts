@@ -20,6 +20,7 @@ import {
 } from "./logfmt.ts";
 import { withStoreLock, LOCK_WRITE } from "./lock.ts";
 import { blockedTs } from "./blocklist.ts";
+import { tombstoneMany } from "./tombstones.ts";
 import { containsSecret, redactSecrets } from "./secrets.ts";
 import { flattenMemoryText } from "./sanitize.ts";
 
@@ -96,6 +97,9 @@ const RESERVED = new Set([
   "deleted.logfmt",
   "canonical.logfmt",
   "blocklist.logfmt",
+  // Value-keyed rejection tombstones (#35). Hashes only, never prose — and it
+  // must never be ingested as a row, exported, or restored by undo.
+  "rejected.logfmt",
   // The use ledger (src/hits.ts): telemetry, not memory. A hit line must never
   // be able to become a row — or to be superseded, exported, or injected.
   HITS_FILENAME,
@@ -395,8 +399,8 @@ async function stampRow(
 
 // Mark an existing memory as superseded IN PLACE (entry retained, recoverable).
 // Idempotent: a second call is a no-op, so no double `superseded_by`.
-export async function markSuperseded(ts: string, fields: SupersedeFields): Promise<boolean> {
-  return (await markManySupersededReport([{ ts, fields }])).marked.length > 0;
+export async function markSuperseded(ts: string, fields: SupersedeFields, durable?: string[]): Promise<boolean> {
+  return (await markManySupersededReport([{ ts, fields }], durable)).marked.length > 0;
 }
 
 // Batch supersession (#61): one lock acquisition, one read, one snapshot and
@@ -408,8 +412,8 @@ export async function markSuperseded(ts: string, fields: SupersedeFields): Promi
 // so a repeat run marks nothing and writes nothing. Duplicate ts entries in
 // one batch: the FIRST entry's fields win (mirrors row-by-row first-call-wins).
 // Returns the number of rows actually marked.
-export async function markManySuperseded(entries: { ts: string; fields: SupersedeFields }[]): Promise<number> {
-  return (await markManySupersededReport(entries)).marked.length;
+export async function markManySuperseded(entries: { ts: string; fields: SupersedeFields }[], durable?: string[]): Promise<number> {
+  return (await markManySupersededReport(entries, durable)).marked.length;
 }
 
 // Same operation, reporting WHICH rows retired rather than how many (#158
@@ -420,6 +424,9 @@ export async function markManySuperseded(entries: { ts: string; fields: Supersed
 // this call did not perform.
 export async function markManySupersededReport(
   entries: { ts: string; fields: SupersedeFields }[],
+  // Updated immediately after EACH publish, even if a later file refuses its
+  // lock or lock cleanup throws. A rejected promise is not a rollback.
+  durable?: string[],
 ): Promise<{ marked: string[] }> {
   if (entries.length === 0) return { marked: [] };
   const wanted = new Map<string, SupersedeFields>();
@@ -460,6 +467,7 @@ export async function markManySupersededReport(
           if (ids.length === 0) return [];
           await snapshotBefore(file);
           await writeAtomic(file, lines.join("\n") + "\n", since);
+          durable?.push(...ids);
           return ids;
         },
         LOCK_WRITE,
@@ -619,9 +627,9 @@ export async function prune(
   type: string,
   reason: string,
   reader: Reader = readerForAmbient(),
+  durable: PruneResult = { deleted: [], snapshot: [] },
 ): Promise<PruneResult> {
-  const deleted: DeletedMemory[] = [];
-  const snapshot: string[] = [];
+  const { deleted, snapshot } = durable;
   for (const file of await memoryFiles()) {
     await withStoreLock(
       file,
@@ -629,6 +637,7 @@ export async function prune(
         const since = await fileIdentity(file);
         const lines = await readLines(file);
         const kept: string[] = [];
+        const fileDeleted: DeletedMemory[] = [];
         let changed = false;
         for (const line of lines) {
           const parsed = parseLine(line);
@@ -637,7 +646,7 @@ export async function prune(
           // another repo's row for scope X — same basename collisions are real
           // (a fork next to its upstream).
           if (m && m.scope === scope && m.type === type && isVisibleTo(m, reader)) {
-            deleted.push({ memory: m, reason });
+            fileDeleted.push({ memory: m, reason });
             await logDeletion(m, reason);
             changed = true;
             continue;
@@ -647,10 +656,29 @@ export async function prune(
         if (!changed) return;
         snapshot.push(...(await snapshotFiles([file])));
         await writeAtomic(file, kept.join("\n") + (kept.length ? "\n" : ""), since);
+        deleted.push(...fileDeleted);
       },
       LOCK_WRITE,
     );
   }
+  // #35: tombstone every forgotten VALUE, keyed on content rather than on the
+  // row's `ts`, so replaying the source cannot store the fact again.
+  //
+  // ONE batched call, not one per row: `memory_forget` deletes by scope+type and
+  // routinely removes hundreds of rows, and the per-row form issued a store-lock
+  // create/unlink pair plus a full re-read of the tombstone file for each one.
+  // Done AFTER the per-file locks are released as well — appending inside the
+  // loop would nest a second store lock (day file, then rejected.logfmt) inside
+  // the first, and one consistent order across the codebase is what keeps the
+  // lock manager from having to reason about nesting at all.
+  await tombstoneMany(
+    deleted.map((d) => ({
+      content: d.memory.content,
+      scope: d.memory.scope,
+      type: d.memory.type,
+    })),
+    { reason, source: "forget" },
+  );
   return { deleted, snapshot };
 }
 

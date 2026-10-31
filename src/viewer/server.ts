@@ -1,19 +1,21 @@
 // Memory Viewer server. Bundled with the plugin: run `bun memory-view` (or
 // `bun run src/viewer/server.ts`) from the repo root and open the printed URL.
-// Binds 127.0.0.1 only — the memory store is local, personal data. All reads go
+// Defaults to 127.0.0.1 — the memory store is local, personal data. All reads go
 // through the same loadAll() used by recall/inject (so blocked entries are
 // hidden), and all mutations are non-destructive (snapshot + audit + supersede).
 // I2: serves only file data; never writes into any repo.
 import { basename, join } from "node:path";
+import { isIP } from "node:net";
 import { serve, type Server } from "bun";
 import { z, type ZodTypeAny } from "zod";
-import { BlockBody, DeleteBody, EditBody, RestoreEntryBody, UnblockBody } from "../schema.ts";
+import { BlockBody, DeleteBody, EditBody, RestoreEntryBody, UnblockBody, UnrejectBody } from "../schema.ts";
 import { deletionsFile, memoryRoot, snapshotDir } from "../config.ts";
 import { blockedEntries } from "../blocklist.ts";
 import { listSnapshots, restoreSnapshot } from "../undo.ts";
 import { appendMemory, loadAll, memoryFiles } from "../memory.ts";
 import { parseLine, readLines } from "../logfmt.ts";
-import { deleteMemory, editMemory, addBlock, removeBlock, type MutationResult } from "./mutate.ts";
+import { deleteMemory, editMemory, blockMemory, unblockMemory, unrejectMemory, type MutationResult } from "./mutate.ts";
+import { tombstones } from "../tombstones.ts";
 
 const PAGE = join(import.meta.dir, "page.html");
 const HOST = process.env.OPENCODE_VIEWER_HOST || "127.0.0.1";
@@ -57,6 +59,18 @@ function allowedHostnames(): Set<string> {
     .map((n) => (n.includes(":") && !n.startsWith("[") ? `[${n}]` : n));
   return new Set(names);
 }
+
+function isLoopbackHostname(name: string): boolean {
+  // allowedHostnames supplies trimmed, lower-cased names (IPv6 bracketed).
+  const host = name.replace(/^\[|\]$/g, "");
+  if (host === "localhost") return true;
+  if (isIP(host) === 4) return host.startsWith("127.");
+  // Closed spellings only: URL parsing throws on IPv6 zone ids. Ambiguous
+  // aliases (including abbreviated IPv4) conservatively trigger the warning.
+  return host === "::1" || host === "0:0:0:0:0:0:0:1";
+}
+
+const EXPOSURE_WARNING = "[memory-viewer] WARNING: non-loopback hosts are allowed. The viewer serves private memory over plain HTTP without authentication; anyone who can reach it with an allowed Host can read or modify the store. Use only on a network you trust.";
 
 function rejectRequest(req: Request, url: URL, port: number): Response | null {
   if (!allowedHostnames().has(url.hostname) || (url.port || "80") !== String(port)) {
@@ -170,15 +184,20 @@ export async function startViewer(port: number = PORT): Promise<ViewerServer> {
     },
   });
   const bound = server.port ?? port;
+  // Warn after binding; wildcard binds (0.0.0.0 and ::) are non-loopback too.
+  if ([...allowedHostnames()].some((host) => !isLoopbackHostname(host))) {
+    console.warn(EXPOSURE_WARNING);
+  }
   return { server, url: `http://${HOST}:${bound}/` };
 }
 
 async function loaded(): Promise<Record<string, unknown>> {
-  const [memories, blocked, deleted, snaps] = await Promise.all([
+  const [memories, blocked, deleted, snaps, rejections] = await Promise.all([
     loadAll(),
     blockedRows(),
     deletedRows(),
     listSnapshots(),
+    tombstones(),
   ]);
   const blockedByTs = new Set(blocked.map((b) => b.ts));
   return {
@@ -200,6 +219,18 @@ async function loaded(): Promise<Record<string, unknown>> {
     })),
     blocked,
     deleted,
+    // #35: the value-keyed rejections. Hashes and metadata only — the store
+    // never held the prose, so there is nothing to reveal here either. The
+    // sketch is omitted: it is matching machinery, not something a reader can
+    // act on.
+    rejections: rejections.map((t) => ({
+      ch: t.ch,
+      reason: t.reason,
+      source: t.source,
+      scope: t.scope ?? "",
+      type: t.type ?? "",
+      rejected_at: t.rejected_at,
+    })),
     snapshots: snaps.map((s) => ({ name: s.name, bytes: s.bytes })),
   };
 }
@@ -211,6 +242,7 @@ async function route(req: Request, url: URL): Promise<Response> {
     if (url.pathname === "/api/delete") return parseWith(DeleteBody, body, deleteRoute);
     if (url.pathname === "/api/block") return parseWith(BlockBody, body, blockRoute);
     if (url.pathname === "/api/unblock") return parseWith(UnblockBody, body, unblockRoute);
+    if (url.pathname === "/api/unreject") return parseWith(UnrejectBody, body, unrejectRoute);
     if (url.pathname === "/api/restore-entry") return parseWith(RestoreEntryBody, body, restoreEntryRoute);
     // /api/restore is deliberately NOT schema-parsed here: its name check is
     // basename + pinned-grammar CONTAINMENT, not a shape gate,
@@ -258,11 +290,18 @@ async function deleteRoute(body: z.infer<typeof DeleteBody>): Promise<Response> 
 }
 
 async function blockRoute(body: z.infer<typeof BlockBody>): Promise<Response> {
-  return json({ ts: await addBlock(body.ts, body.reason) });
+  return json({ ts: await blockMemory(body) });
 }
 
 async function unblockRoute(body: z.infer<typeof UnblockBody>): Promise<Response> {
-  return json({ unblocked: await removeBlock(body.ts) });
+  return json({ unblocked: await unblockMemory(body.ts) });
+}
+
+// The only way a rejection is ever lifted (#35). Human-only: the plugin exposes
+// no tool for this, so a session whose write was refused cannot clear the
+// refusal and re-submit the rejected value.
+async function unrejectRoute(body: z.infer<typeof UnrejectBody>): Promise<Response> {
+  return json({ unrejected: await unrejectMemory(body.ch) });
 }
 
 async function restoreEntryRoute(body: z.infer<typeof RestoreEntryBody>): Promise<Response> {
@@ -303,6 +342,6 @@ async function restoreRoute(body: Record<string, unknown>): Promise<Response> {
 
 if (import.meta.main) {
   startViewer(PORT).then(({ url }) => {
-    console.log(`\nMemory Viewer: ${url}\n(127.0.0.1 only; snapshot+audit are mandatory on every edit/delete)`);
+    console.log(`\nMemory Viewer: ${url}\n(snapshot+audit are mandatory on every edit/delete)`);
   });
 }

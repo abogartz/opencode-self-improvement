@@ -13,8 +13,15 @@ export async function pruneMemory(
   // CALLER's identity, captured at tool entry, not the ambient current the
   // locked file walk may outlive. "?" / undefined keep ambient semantics.
   sid?: string,
-): Promise<PruneResult & { audit: string }> {
-  const res = await prune(scope, type, reason, readerFromSid(sid));
+): Promise<PruneResult & { audit: string; error?: string }> {
+  const res: PruneResult = { deleted: [], snapshot: [] };
+  let error: string | undefined;
+  try {
+    await prune(scope, type, reason, readerFromSid(sid), res);
+  } catch (err) {
+    if (res.deleted.length === 0) throw err;
+    error = err instanceof Error ? err.message : String(err);
+  }
   const memTs = res.deleted.map((d) => d.memory.ts).join(",") || "-";
   await record(
     "prune",
@@ -24,9 +31,14 @@ export async function pruneMemory(
       snapshot: res.snapshot[0] ?? "-",
       audit: deletionsFile(),
       tool: "memory_forget",
+      partial: error ? true : undefined,
+      error,
     },
     true,
     sid,
-  );
-  return { ...res, audit: deletionsFile() };
+  ).catch((audit) => {
+    if (!error) throw audit;
+    error += `; audit failed: ${String(audit)}`;
+  });
+  return { ...res, audit: deletionsFile(), ...(error ? { error } : {}) };
 }
