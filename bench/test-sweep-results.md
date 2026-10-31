@@ -1,5 +1,9 @@
 # The mutation sweep: what the suite actually pins (issue #70)
 
+Historical measurement: for the later #71 catalog and pinned before/after results, see [test-integrity-71.json](test-integrity-71.json). The denominators describe different trees/catalogs and must not be combined.
+
+The #71 inputs are retained as [before.jsonl](test-integrity-71/before.jsonl) and [after.jsonl](test-integrity-71/after.jsonl). From the repository root at the #195 branch, rebuild with `bun scripts/triage-71.ts bench/test-integrity-71/before.jsonl bench/test-integrity-71/after.jsonl <output.json>`. These logs reproduce the original pinned report, not a new sweep of subsequent changes. Per-test kill sets are observations from those runs, not stable coverage quantities.
+
 One question, answered mechanically: when an invariant dies, does anything die with it? Each mutant breaks
 exactly ONE claimed invariant in a detached scratch worktree of HEAD and runs the full suite against that tree.
 A mutant nothing kills is an invariant the suite does not actually depend on, whatever the test titles claim.

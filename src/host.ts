@@ -23,14 +23,18 @@ export interface SessionIdentity {
   directory?: string;
 }
 
+// Shared with the recording-backed fidelity checks. Adding a trigger requires
+// both a protocol declaration and an observation from a live host.
+export const IDENTITY_EVENT_TYPES: readonly string[] = Object.freeze([
+  "session.created",
+  "session.execution.started",
+  "session.moved",
+]);
+
 /** A directory-less identity still lets the caller resolve the session row. */
 export function sessionIdentityEvent(raw: unknown): SessionIdentity | undefined {
   const event = fields(raw);
-  if (
-    event.type !== "session.created" &&
-    event.type !== "session.execution.started" &&
-    event.type !== "session.moved"
-  ) return undefined;
+  if (typeof event.type !== "string" || !IDENTITY_EVENT_TYPES.includes(event.type)) return undefined;
   const data = fields(event.data ?? event.properties);
   const info = fields(data.info ?? data);
   const sessionID = info.sessionID ?? data.sessionID;

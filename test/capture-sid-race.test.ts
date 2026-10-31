@@ -189,9 +189,9 @@ describe("capture repo stamp follows the captured session (#116)", () => {
       repoScopeFor("ses-capture")?.key,
     );
     expect(evidence().some((e) => String(e.ev ?? "").startsWith("auto_capture_compaction_"))).toBe(true);
-    // Paper trail again (#118 note 1): here NOTHING ever calls setCurrent, so
-    // on ambient-read code the gate lines carry sid="?" — residue of an unset
-    // global, not data. Threaded, they carry the captured session.
+    // This is the no-interleave control: captureSession itself binds setCurrent,
+    // so ambient-read code can pass this assertion by coincidence. The hijack
+    // cases above establish that the session survives an actual interleave.
     expect(evidence().find((e) => e.ev === "write_promoted")!.sid).toBe("ses-capture");
   });
 

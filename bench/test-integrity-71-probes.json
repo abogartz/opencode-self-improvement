@@ -1,0 +1,156 @@
+{
+  "baselineTests": "8f97437",
+  "candidateTests": "96b7d3d",
+  "runtime": "Bun 1.4.4, Windows x64",
+  "method": "Apply each source replacement independently, select exactly the named test with bun test --test-name-pattern, and run its baseline and candidate versions in separate processes. Restore source and test bytes after each probe. These nine probes are additional to, not members of, the 44-mutant score.",
+  "probes": [
+    {
+      "id": "reader-parseable-prefix",
+      "source": "src/logfmt.ts",
+      "test": "test/concurrency.test.ts",
+      "pattern": "a concurrent reader never sees",
+      "changes": [
+        [
+          "export async function readLines(file: string): Promise<string[]> {",
+          "let probeRead = 0;\nexport async function readLines(file: string): Promise<string[]> {"
+        ],
+        [
+          "return text.split(\"\\n\").filter((l) => l.trim().length > 0);",
+          "const rows = text.split(\"\\n\").filter((l) => l.trim().length > 0); return ++probeRead === 1 ? rows.slice(0, 150) : rows;"
+        ]
+      ],
+      "baselineExit": 0,
+      "candidateExit": 1,
+      "baselinePass": 1,
+      "candidateFail": 1
+    },
+    {
+      "id": "snapshot-loses-identity",
+      "source": "src/memory.ts",
+      "test": "test/scenarios.test.ts",
+      "pattern": "deletes with reason, snapshots",
+      "changes": [
+        [
+          "await Bun.write(snap, contents);",
+          "await Bun.write(snap, contents.toString().replace(/ts=\\S+ /, \"ts=2000-01-01T00:00:00.000Z \"));"
+        ]
+      ],
+      "baselineExit": 0,
+      "candidateExit": 1,
+      "baselinePass": 1,
+      "candidateFail": 1
+    },
+    {
+      "id": "epoch-cropped-row",
+      "source": "src/inject.ts",
+      "test": "test/epoch.test.ts",
+      "pattern": "case 4: budget cap",
+      "changes": [
+        [
+          "return kept.join(\"\\n\");",
+          "return kept.map((line) => line.startsWith(\"- \") ? line.slice(0, -1) : line).join(\"\\n\");"
+        ]
+      ],
+      "baselineExit": 0,
+      "candidateExit": 1,
+      "baselinePass": 1,
+      "candidateFail": 1
+    },
+    {
+      "id": "compaction-cropped-row",
+      "source": "src/inject.ts",
+      "test": "test/compaction.test.ts",
+      "pattern": "anchor is capped",
+      "changes": [
+        [
+          "return kept.join(\"\\n\");",
+          "return kept.map((line) => line.startsWith(\"- \") ? line.slice(0, -1) : line).join(\"\\n\");"
+        ]
+      ],
+      "baselineExit": 0,
+      "candidateExit": 1,
+      "baselinePass": 1,
+      "candidateFail": 1
+    },
+    {
+      "id": "status-fabricated-count",
+      "source": "src/injection-epochs.ts",
+      "test": "test/status.test.ts",
+      "pattern": "injections count at the decision",
+      "changes": [
+        [
+          "st.cumChars += knowledge.length;",
+          "st.cumChars += 1;"
+        ]
+      ],
+      "baselineExit": 0,
+      "candidateExit": 1,
+      "baselinePass": 1,
+      "candidateFail": 1
+    },
+    {
+      "id": "plugin-header-only",
+      "source": "src/inject.ts",
+      "test": "test/plugin.test.ts",
+      "pattern": "session.context pushes",
+      "changes": [
+        [
+          "\"Durable memories exist for this repository. Check memory_recall BEFORE grepping or \" +\n      \"reading, for build/test/lint commands, decisions, and conventions. Relevant memories \" +\n      \"are also auto-injected when your message matches.\"",
+          "\"\""
+        ]
+      ],
+      "baselineExit": 0,
+      "candidateExit": 1,
+      "baselinePass": 1,
+      "candidateFail": 1
+    },
+    {
+      "id": "command-missing-throws",
+      "source": "src/command.ts",
+      "test": "test/command.test.ts",
+      "pattern": "missing.*source",
+      "changes": [
+        [
+          "} catch {\n    return null;",
+          "} catch (err) {\n    throw err;"
+        ]
+      ],
+      "baselineExit": 0,
+      "candidateExit": 1,
+      "baselinePass": 1,
+      "candidateFail": 1
+    },
+    {
+      "id": "path-trailing-slash",
+      "source": "src/repokey.ts",
+      "test": "test/repokey-path.test.ts",
+      "pattern": "normalizeDirPath returns",
+      "changes": [
+        [
+          "return r || \"/\";",
+          "return (r || \"\") + \"/\";"
+        ]
+      ],
+      "baselineExit": 0,
+      "candidateExit": 1,
+      "baselinePass": 1,
+      "candidateFail": 1
+    },
+    {
+      "id": "path-alias-mismatch",
+      "source": "src/repokey.ts",
+      "test": "test/repokey-path.test.ts",
+      "pattern": "path hash is stable",
+      "changes": [
+        [
+          "return { key, path };",
+          "return { key: startDir.endsWith(\"alias-link\") ? \"wrong-alias\" : key, path };"
+        ]
+      ],
+      "baselineExit": 0,
+      "candidateExit": 1,
+      "baselinePass": 1,
+      "candidateFail": 1
+    }
+  ]
+}

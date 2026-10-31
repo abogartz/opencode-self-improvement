@@ -16,8 +16,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { repoScopeFor, resetSessionScopes, resolveRepo, setRepoScope } from "../src/repokey.ts";
+import { repoScopeFor, resetSessionScopes, resolveRepo, sessionScope, setRepoScope } from "../src/repokey.ts";
 import { loadPlugin } from "./harness.ts";
+import moveRecording from "./fixtures/host-session-move.json";
 
 let root: string;
 beforeEach(() => {
@@ -55,6 +56,45 @@ const executionStarted = (sid: string) => ({
   type: "session.execution.started",
   durable: { aggregateID: sid, seq: 2, version: 1 },
   data: { sessionID: sid },
+});
+
+describe("serve-host replay: recorded 2.2.2 session move (#176)", () => {
+  test("rebinds to data.location, not the old outer location, before the next write", async () => {
+    const from = join(root, "move-from");
+    const to = join(root, "move-to");
+    mkdirSync(from);
+    mkdirSync(to);
+    const recorded = moveRecording.events[0];
+    expect(recorded.type).toBe("session.moved");
+    expect(recorded.location.directory).not.toBe(recorded.data.location.directory);
+    const sid = recorded.data.sessionID;
+    const loaded = await loadPlugin(from);
+    try {
+      // Establish the original binding through the existing API fallback.
+      loaded.capture.session.row = { id: sid, location: { directory: from } };
+      loaded.capture.events.push(executionStarted(sid));
+      await waitFor(() => sessionScope(sid)?.path === from);
+      const lookups = loaded.capture.session.getCalls.length;
+
+      // Replay the captured shape with only its path placeholders relocated to
+      // this test's disposable directories. The fallback row deliberately stays A.
+      loaded.capture.events.push({
+        ...recorded,
+        location: { ...recorded.location, directory: from },
+        data: { ...recorded.data, location: { ...recorded.data.location, directory: to } },
+      });
+      await waitFor(() => sessionScope(sid)?.path === to);
+      expect(loaded.capture.session.getCalls.length).toBe(lookups);
+      const out = await writeOne(loaded, sid, "recorded workspace move destination fact");
+      expect(out.content).toContain("Remembered");
+      const raw = readFileSync(dayFile(), "utf8");
+      expect(raw).toContain(`repo=${keyOf(to)}`);
+      expect(raw).toContain(`repoPath=${to}`);
+      expect(raw).not.toContain(`repo=${keyOf(from)}`);
+    } finally {
+      await loaded.cleanup();
+    }
+  });
 });
 
 // Recorded serve-mode context messages: no `location` on any row.

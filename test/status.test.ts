@@ -381,8 +381,17 @@ describe("memory_status tool + epoch wiring", () => {
     });
     await p.sessionHooks["prompt"]!({ sessionID: "ses_m", prompt: { text: "how do I run bun test" } });
     // Two provider requests through the injection decision.
-    await p["experimental.chat.system.transform"]({ sessionID: "ses_m" }, { system: [] });
-    await p["experimental.chat.system.transform"]({ sessionID: "ses_m" }, { system: [] });
+    const delivered = [{ system: [] as string[] }, { system: [] as string[] }];
+    for (const output of delivered) {
+      await p["experimental.chat.system.transform"]({ sessionID: "ses_m" }, output);
+    }
+    const knowledge = delivered.map((output, request) => {
+      const block = output.system.find((part) => part.startsWith("## Relevant durable memory"));
+      if (block === undefined) throw new Error(`provider request ${request + 1} did not receive its durable memory block`);
+      return block;
+    });
+    for (const block of knowledge) expect(block).toContain("run bun test from the repo root to execute the suite");
+    const expectedChars = knowledge.reduce((sum, block) => sum + block.length, 0);
     // Measured usage arrives on the event bus (measured listener is default-on).
     p.capture.events.push({
       type: "message.updated",
@@ -398,7 +407,7 @@ describe("memory_status tool + epoch wiring", () => {
     const s = await poll(() => readStatus("ses_m").then((r) => (r?.measured ? r : null)));
     expect(s?.measured?.read).toBe(41200);
     expect(s?.stats?.requests).toBe(2);
-    expect(s?.stats?.cumChars).toBeGreaterThan(0);
+    expect(s?.stats?.cumChars).toBe(expectedChars);
     expect(s?.stats?.epochRequests).toBe(2);
 
     // The tool (in-process truth) renders the same receipts for this session.

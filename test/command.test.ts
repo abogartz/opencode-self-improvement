@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin } from "./harness.ts";
 import { resetState } from "../src/state.ts";
+import { ensureCommand } from "../src/command.ts";
 
 let commandsDirPath: string;
 let root: string;
@@ -39,12 +40,10 @@ describe("ensureInitCommand", () => {
     expect(readFileSync(target, "utf8")).toBe("# user-customized\n");
   });
 
-  test("missing source degrades silently (no throw on load)", async () => {
-    // command/repo-init.md referenced from import.meta.dir always exists in a
-    // real install; simulate a broken package by pointing SOURCE nowhere is not
-    // possible without a hook, so assert the factory still loads and the dir is
-    // created without error in the happy path.
-    const hooks = await loadPlugin(process.cwd());
-    expect(Object.keys(hooks.tool).length).toBeGreaterThan(0);
+  test("a missing command source returns null and writes no command", async () => {
+    // Exercise the actual missing-source branch without changing the package.
+    expect(existsSync(commandsDirPath)).toBe(false);
+    expect(await ensureCommand("deliberately-absent-test-command")).toBeNull();
+    expect(existsSync(commandsDirPath)).toBe(false);
   });
 });

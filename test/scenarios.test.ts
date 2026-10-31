@@ -712,6 +712,7 @@ describe("S-edge — incoming-stale write (poisoning guard)", () => {
 describe("S5 — prune-a-bad-memory (Principle 3)", () => {
   test("deletes with reason, snapshots for rollback, audits, never repo-touching", async () => {
     const T1 = seed("pattern", "testing", "always run vitest before playwright");
+    const before = readFileSync(join(memoryRoot(), `${T1.split("T")[0]}.logfmt`), "utf8");
     mkdirSync(snapshotDir(), { recursive: true });
 
     const res = await pruneMemory("testing", "pattern", "playwright now gates CI first");
@@ -728,10 +729,8 @@ describe("S5 — prune-a-bad-memory (Principle 3)", () => {
     const audit = readFileSync(join(memoryRoot(), "deletions.logfmt"), "utf8");
     expect(audit).toContain("playwright now gates CI first");
 
-    expect(res.snapshot.length).toBeGreaterThan(0);
-    expect(readFileSync(res.snapshot[0], "utf8")).toContain(
-      "always run vitest before playwright",
-    );
+    expect(res.snapshot).toHaveLength(1);
+    expect(readFileSync(res.snapshot[0], "utf8")).toBe(before);
     expect(res.snapshot[0]).toContain(memoryRoot());
     expect(res.snapshot[0]).not.toContain(liveRoot);
   });

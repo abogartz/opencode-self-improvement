@@ -120,8 +120,11 @@ describe("plugin wiring (OpenCode V2)", () => {
       system: [],
     };
     await loaded.sessionHooks["context"]!(event);
-    expect(event.system.length).toBeGreaterThan(0);
+    expect(event.system).toHaveLength(1);
     expect(event.system[0].type).toBe("text");
     expect(event.system[0].text).toContain("## Persistent memory");
+    // With no query, the digest advertises recall rather than injecting rows.
+    expect(event.system[0].text).toContain("Check memory_recall BEFORE grepping or reading");
+    expect(event.system[0].text).toContain("Relevant memories are also auto-injected when your message matches.");
   });
 });
