@@ -51,7 +51,7 @@
 // --log=PATH (JSONL event log).
 import { existsSync, readFileSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { testOutcomes } from "./sweep-output.ts";
+import { suiteAccounting } from "./sweep-output.ts";
 import { fileURLToPath } from "node:url";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -663,6 +663,8 @@ interface RunEvent {
 	delta?: string[];
 	status?: string;
 	tail?: string;
+	rawCounts?: { pass: number; fail: number; skip: number };
+	capabilitySkipped?: string[];
 }
 const runEvents = new Map<string, RunEvent[]>();
 function logEvent(e: RunEvent): void {
@@ -867,6 +869,8 @@ interface SuiteRun {
 	pass: number;
 	fail: number;
 	skip: number;
+	rawCounts: { pass: number; fail: number; skip: number };
+	capabilitySkipped: string[];
 	/** test-level failures, named "<file> > <suite> > <test>" */
 	failed: string[];
 	passed: string[];
@@ -918,22 +922,12 @@ async function runSuite(dir: string): Promise<SuiteRun> {
 	// reports as the tally (found on Linux, Bun 1.4.4 - the baseline parsed 0 and
 	// the whole sweep refused to start). Anchor to the summary's whole line and
 	// take the LAST occurrence; (pass)-lines can never match the anchor.
-	const num = (label: string): number => {
-		const all = [...out.matchAll(new RegExp(`^\\s*(\\d+) ${label}\\s*$`, "gm"))];
-		return all.length ? Number(all[all.length - 1]?.[1] ?? "0") : 0;
-	};
-	const { passed, skipped, failed, fileFailed } = testOutcomes(out);
+	const accounting = suiteAccounting(out);
 	return {
 		exit: proc.exitCode ?? 1,
 		seconds,
 		timedOut: (proc as { timedOut?: boolean }).timedOut === true || outcome === "stuck",
-		pass: num("pass"),
-		fail: num("fail"),
-		skip: num("skip"),
-		failed,
-		passed,
-		skipped,
-		fileFailed,
+		...accounting,
 		errorMarkers: [...out.matchAll(/(SyntaxError: [^\n]*|Transform failed[^\n]*|Cannot find (?:module|package)[^\n]*)/g)].map((x) => x[1] ?? ""),
 		tail: out.slice(-1500),
 	};
@@ -1235,7 +1229,8 @@ async function main(): Promise<number> {
 	for (const name of base.failed) {
 		console.log(`  ${KNOWN_BASELINE_FAILS.some((re) => re.test(name)) ? "known" : "NEW "}  ${cut(name, 100)}`);
 	}
-	logEvent({ mutant: "baseline", delta: base.failed, tests: base.passed, skipped: base.skipped });
+	logEvent({ mutant: "baseline", delta: base.failed, tests: base.passed, skipped: base.skipped,
+		rawCounts: base.rawCounts, capabilitySkipped: base.capabilitySkipped });
 	BASELINE_TOTAL = base.pass + base.fail + base.skip + base.fileFailed.length;
 	if (base.pass === 0 || base.timedOut) {
 		console.error("baseline produced no results - nothing is measurable (exit 3)");
