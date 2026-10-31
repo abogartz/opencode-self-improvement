@@ -47,6 +47,8 @@ After that, memory is just conversation: ask the agent to remember something and
 - **Surfaces** — a terminal footer badge and `/memory` panel, `/memory-report` for chat clients, a `memory_status` tool, and a browser admin editor. See [Surfaces](#surfaces).
 - **Secret redaction** — credential-shaped values in content become `[redacted]`. See [Secret redaction](#secret-redaction).
 
+Daily memory writes publish a complete replacement file under that lock, so concurrent readers see the previous or new complete file rather than a partially appended record. Appending a row therefore rewrites the day file (in addition to the existing timestamp-uniqueness read). On Windows, a reader handle that prevents replacement can make the write refuse after the replacement retry window; the previous bytes remain intact and the caller can retry once the handle closes. This publication rule applies to daily memory files, not append-only evidence, use, rejection, or audit logs; [#198](https://github.com/abogartz/opencode-self-improvement/issues/198) tracks the broader read boundary.
+
 Memory is stored outside every repository, under `~/.config/opencode/memory` by default (override with `OPENCODE_MEMORY_DIR`). To start over, delete that directory.
 
 ## Options

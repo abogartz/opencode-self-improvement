@@ -215,9 +215,9 @@ export interface AppendMemoryInput {
 // it can collide with are ones this same file received in the same millisecond;
 // scanning just it keeps the locked section to one read of one file. (A row
 // hand-placed with today's ts in another day's file is outside this promise.)
-async function existingTs(file: string): Promise<Set<string>> {
+function existingTs(text: string): Set<string> {
   const set = new Set<string>();
-  for (const line of await readLines(file)) {
+  for (const line of text.split("\n")) {
     const f = parseLine(line);
     if (f && typeof f.ts === "string") set.add(f.ts);
   }
@@ -323,28 +323,34 @@ export async function appendMemory(input: AppendMemoryInput): Promise<string> {
   // two rows with the same identity, and an append that lands inside someone
   // else's whole-file rewrite is simply not there afterwards.
   return withStoreLock(file, async () => {
-    const taken = await existingTs(file);
+    const since = await fileIdentity(file);
+    let prior = "";
+    try { prior = await readFile(file, "utf8"); }
+    catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err; }
+    const taken = existingTs(prior);
     let ts = new Date().toISOString();
     let guard = 0;
     while (taken.has(ts) && guard++ < 1000) {
       ts = new Date(new Date(ts).getTime() + 1).toISOString();
     }
     const kw = normalizeKeywords(input.kw);
-    await appendLog(
-      file,
-      formatLine({
-        ts,
-        type: input.type,
-        scope: input.scope,
-        content,
-        issue: input.issue,
-        tags: input.tags?.length ? input.tags.join(",") : undefined,
-        kw: kw?.join(","),
-        status: input.status,
-        repo,
-        repoPath,
-      }),
-    );
+    const line = formatLine({
+      ts,
+      type: input.type,
+      scope: input.scope,
+      content,
+      issue: input.issue,
+      tags: input.tags?.length ? input.tags.join(",") : undefined,
+      kw: kw?.join(","),
+      status: input.status,
+      repo,
+      repoPath,
+    });
+    // A lock excludes writers, not readers: an O_APPEND read can end mid-row.
+    // Publish the complete day file using the read already needed for IDs.
+    // This costs a whole-file write and can refuse on Windows reader handles;
+    // the old destination remains intact if publication fails (#198).
+    await writeAtomic(file, prior + (prior && !prior.endsWith("\n") ? "\n" : "") + line + "\n", since);
     return ts;
   }, LOCK_WRITE);
 }
