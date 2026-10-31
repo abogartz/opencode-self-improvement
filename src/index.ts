@@ -31,7 +31,7 @@ import { pruneMemory } from "./prune.ts";
 import { exportMemories, findStaleOpen, importMemories } from "./portable.ts";
 import { listSnapshots, restoreSnapshot } from "./undo.ts";
 import { SESSION_CAP, SessionLru } from "./sessions.ts";
-import { evidenceFileFor, record, recordCaptureLag } from "./evidence.ts";
+import { captureEvidenceContext, evidenceFileFor, record, recordCaptureLag } from "./evidence.ts";
 import { proposeConsolidations, renderProposals } from "./consolidate.ts";
 import { readReads } from "./hits.ts";
 import {
@@ -298,6 +298,7 @@ const impl = {
         sessionID: sid,
         reader: readerFromSid(sid),
         writeAt: writeTarget(bound),
+        evidenceContext: captureEvidenceContext(sid),
         // NOTE (re-review): this one lookup is intentionally NON-firm — a
         // provisional binding may supply the gate's verification TREE. The
         // tree is where a referenced file is checked to exist, not who the
@@ -554,6 +555,7 @@ const impl = {
           const ownerless = ownerlessWriter(sid);
           if (ownerless) return await refuseOwnerlessWrite(ownerless, "update");
           const reader = readerFromSid(sid);
+          const updateGate = gateContext(sid);
           // The whole update — resolve, gate, supersede — runs under one
           // UPDATE-ORDER lock. Without it, two concurrent updates that both
           // resolved the same still-active target both promoted and both
@@ -689,7 +691,7 @@ const impl = {
                     repo: requested.repo,
                     repoPath: target.repo ? target.repoPath : undefined,
                   },
-                  { ...gateContext(sid), reader, supersedesTs: target.ts, durable: gateDurable },
+                  { ...updateGate, reader, supersedesTs: target.ts, durable: gateDurable },
                 );
                 if (outcome.action === "promoted" && outcome.ts && target) {
                   mutated = true;

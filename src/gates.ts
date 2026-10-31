@@ -13,7 +13,7 @@ import {
   type Memory,
   type SupersedeFields,
 } from "./memory.ts";
-import { chainId, contentHash, record, recordWriteBlocked } from "./evidence.ts";
+import { captureEvidenceContext, type EvidenceContext, chainId, contentHash, record, recordWriteBlocked } from "./evidence.ts";
 import { getCurrent, noteAuthored } from "./state.ts";
 import { MAX_WRITE_EVIDENCE_REFS } from "./triggers.ts";
 import { flattenMemoryText } from "./sanitize.ts";
@@ -77,6 +77,7 @@ export interface GateContext {
   // absent/"?" callers capture ambient authority at entry (not after awaits).
   reader?: Reader;
   writeAt?: WriteTarget;
+  evidenceContext?: EvidenceContext;
   evidenceCalls: string[];
   // Total before the telemetry window was selected. Legacy/direct callers
   // may still supply their complete list; the writer bounds that too.
@@ -249,17 +250,13 @@ export async function runWriteGate(
 ): Promise<GateOutcome> {
   const reader = ctx.reader ?? readerFromSid(ctx.sessionID);
   const writeAt = ctx.writeAt ?? writeTarget(ctx.sessionID ?? getCurrent().sid);
+  const evidenceContext = ctx.evidenceContext ?? captureEvidenceContext(ctx.sessionID);
   const chain = chainId();
-  // Gate audit lines thread the session: runWriteGate awaits (analysis, the
-  // locked append), and another session's dispatch can move the ambient
-  // current mid-gate — ambient-read lines would then name the wrong session
-  // (#118 review note 1; the rows were fixed in #118, these were the
-  // residue). Where ctx.sessionID is unset (tool paths — issue #121) record()
-  // keeps the ambient read, exactly as before.
+  // Keep all gate audit lines with entry-time attribution, including refusals.
   const rec = (ev: string, fields: Record<string, unknown> = {}, includeContext = true) =>
-    record(ev, fields, includeContext, ctx.sessionID);
+    record(ev, fields, includeContext, ctx.sessionID, evidenceContext);
   const recBlocked = (gate: number, reason: string, flags: string[], chain?: string) =>
-    recordWriteBlocked(gate, reason, flags, chain, ctx.sessionID);
+    recordWriteBlocked(gate, reason, flags, chain, ctx.sessionID, evidenceContext);
 
   // Size/type floor BEFORE any scanning: gate analysis regexes
   // over megabyte content backtrack super-linearly and freeze the service
