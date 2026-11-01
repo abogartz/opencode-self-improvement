@@ -94,10 +94,10 @@ const QUOTE_CLASS = "[\\s\"=]";
 const QUOTE_CLASS_PLAIN = "[\"=]";
 
 export const MUTANTS: Mutant[] = [
-	// ---- store lock (src/lock.ts) -------------------------------------------
+	// ---- store lock (src/store/lock.ts) -------------------------------------------
 	{
 		id: "lock-noexcl-mutex",
-		file: "src/lock.ts",
+		file: "src/store/lock.ts",
 		find: `const handle = await open(lockPath, "wx");`,
 		replace: `const handle = await open(lockPath, "w");`,
 		invariant: "lock file is created with O_EXCL: the mutex is cross-process",
@@ -106,7 +106,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "lock-no-stale-steal",
-		file: "src/lock.ts",
+		file: "src/store/lock.ts",
 		find: `if (age < STALE_MS) return false;`,
 		replace: `if (age >= 0) return false;`,
 		invariant: "a lock abandoned by a dead process is taken over after age",
@@ -114,16 +114,16 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "lock-restore-failopen",
-		file: "src/lock.ts",
+		file: "src/store/lock.ts",
 		find: L(`export const LOCK_RESTORE: LockOptions = {`, `  onTimeout: "fail",`),
 		replace: L(`export const LOCK_RESTORE: LockOptions = {`, `  onTimeout: "proceed",`),
 		invariant: "restore fails CLOSED on a busy store, because force drops rows",
 		class: "D2",
 	},
-	// ---- atomic publish / handover (src/logfmt.ts) ---------------------------
+	// ---- atomic publish / handover (src/core/logfmt/publish.ts; plant in format.ts) ---------------------------
 	{
 		id: "publish-rename-to-truncate",
-		file: "src/logfmt.ts",
+		file: "src/core/logfmt/publish.ts",
 		// Re-anchored 2026-10-26: #89 moved the rename into handoverRename;
 		// the publish as it now stands still means hand-over-by-rename, so the
 		// mutation keeps its meaning - collapse the write+handover pair into a
@@ -135,7 +135,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "publish-rename-since-blind",
-		file: "src/logfmt.ts",
+		file: "src/core/logfmt/publish.ts",
 		// #110 companion (the ruling's "pin-first" follow-up): the anchored
 		// retry renames only while the destination still matches `since`. Blind
 		// it and a contention-blocked writer keeps retrying past a mid-window
@@ -151,16 +151,16 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "append-truncate-regression",
-		file: "src/logfmt.ts",
+		file: "src/core/logfmt/publish.ts",
 		find: `await appendFile(file, next);`,
 		replace: `await Bun.write(file, next);`,
 		invariant: "appends are one O_APPEND write, never a replacing write",
 		class: "D2",
 	},
-	// ---- store write paths (src/memory.ts) -----------------------------------
+	// ---- store write paths (src/store/files/*, store/model/*) -----------------------------------
 	{
 		id: "append-nolock",
-		file: "src/memory.ts",
+		file: "src/store/files/append.ts",
 		find: `return withStoreLock(file, async () => {`,
 		replace: `return ((...a: unknown[]) => (a[1] as () => Promise<unknown>)())(file, async () => {`,
 		invariant: "appends hold the store lock: none lands inside an RMW window",
@@ -169,7 +169,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "supersede-rmw-nolock",
-		file: "src/memory.ts",
+		file: "src/store/files/snapshots.ts",
 		find: L(`  return withStoreLock(`, `    file,`, `    async () => {`),
 		replace: L(
 			`  return ((...a: unknown[]) => (a[1] as () => Promise<unknown>)())(`,
@@ -182,7 +182,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "prune-nolock",
-		file: "src/memory.ts",
+		file: "src/store/files/prune.ts",
 		find: L(`    await withStoreLock(`, `      file,`),
 		replace: L(
 			`    await ((...a: unknown[]) => (a[1] as () => Promise<unknown>)())(`,
@@ -194,7 +194,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "prune-repofloor-off",
-		file: "src/memory.ts",
+		file: "src/store/files/prune.ts",
 		find: `if (m && m.scope === scope && m.type === type && isVisibleTo(m, reader)) {`,
 		replace: `if (m && m.scope === scope && m.type === type) {`,
 		invariant: "forget never deletes another repo's row for the same scope",
@@ -202,7 +202,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "blocklist-poison-filter-off",
-		file: "src/memory.ts",
+		file: "src/store/files/load.ts",
 		find: `if (m && !blocked.has(m.ts)) out.push(m);`,
 		replace: `if (m) out.push(m);`,
 		invariant: "blocked (poisoned) rows are filtered from every read path",
@@ -210,7 +210,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "malformed-ts-guard-and",
-		file: "src/memory.ts",
+		file: "src/store/files/load.ts",
 		find: `if (!ISO_TS_RE.test(ts) || Number.isNaN(Date.parse(ts))) {`,
 		replace: `if (!ISO_TS_RE.test(ts) && Number.isNaN(Date.parse(ts))) {`,
 		invariant: "a non-ISO ts is malformed: skipped, never an addressable row",
@@ -218,7 +218,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "redact-chokepoint-off",
-		file: "src/memory.ts",
+		file: "src/store/files/append.ts",
 		find: `const content = redactSecrets(input.content);`,
 		replace: `const content = input.content;`,
 		invariant: "secrets are redacted at the single write choke point",
@@ -226,7 +226,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "metadata-secret-guard-off",
-		file: "src/memory.ts",
+		file: "src/store/files/append.ts",
 		find: `if (credentialMetadata.length) {`,
 		replace: `if (false && credentialMetadata.length) {`,
 		invariant: "credential-shaped metadata is refused, not stored",
@@ -234,7 +234,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "snapshot-overwrite",
-		file: "src/memory.ts",
+		file: "src/store/files/snapshots.ts",
 		find: `const handle = await open(snap, "wx");`,
 		replace: `const handle = await open(snap, "w");`,
 		invariant: "claimSnapshot bumps names with O_EXCL: a snapshot is never",
@@ -242,16 +242,16 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "visible-global-off",
-		file: "src/memory.ts",
+		file: "src/store/model/visibility.ts",
 		find: `if (!m.repo || m.repo === "global") return true;`,
 		replace: `if (!m.repo) return true;`,
 		invariant: "repo visibility: explicitly-global rows stay visible everywhere",
 		class: "guard",
 	},
-	// ---- snapshot-then-restore pairing (src/undo.ts) --------------------------
+	// ---- snapshot-then-restore pairing (src/store/undo.ts) --------------------------
 	{
 		id: "undo-force-safety-removed",
-		file: "src/undo.ts",
+		file: "src/store/undo.ts",
 		find: `const safety = mode === "force" ? (await snapshotFiles([target]))[0] : undefined;`,
 		replace: `const safety: string | undefined = undefined;`,
 		invariant: "force-restore snapshots what it drops, inside the lock:",
@@ -260,7 +260,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "undo-force-safety-after-publish",
-		file: "src/undo.ts",
+		file: "src/store/undo.ts",
 		find: L(
 			"      const safety = mode === \"force\" ? (await snapshotFiles([target]))[0] : undefined;",
 			"",
@@ -334,7 +334,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "undo-check-mutates",
-		file: "src/undo.ts",
+		file: "src/store/undo.ts",
 		find: `if (mode === "check" && (concurrentAdded.length || concurrentChanged.length)) {`,
 		replace: `if (mode === "check" && (concurrentAdded.length || concurrentChanged.length) && false) {`,
 		invariant: "check mode never writes: a diverged store is refused, untouched",
@@ -342,7 +342,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "undo-escapes-root-branch",
-		file: "src/undo.ts",
+		file: "src/store/undo.ts",
 		find: `if (!isWithin(snapshotsResolved, requestedResolved)) {`,
 		replace: `if (false && !isWithin(snapshotsResolved, requestedResolved)) {`,
 		invariant: "containment: the requested snapshot path stays in snapshots/",
@@ -351,10 +351,10 @@ export const MUTANTS: Mutant[] = [
 		// disproved that: undo.test.ts kills it. The #70 finding-3 probe missed
 		// a hostile-name shape that survives the realpath pre-check.
 	},
-	// ---- injection budget trimming (src/inject.ts) -----------------------------
+	// ---- injection budget trimming (src/inject/budget.ts, recall/score.ts, inject/digest.ts) -----------------------------
 	{
 		id: "budget-overlong-breaks-scan",
-		file: "src/inject.ts",
+		file: "src/inject/budget.ts",
 		find: `if (len + line.length + 1 > budget) continue; // skip over-long lines, keep scanning`,
 		replace: `if (len + line.length + 1 > budget) break; // skip over-long lines, keep scanning`,
 		invariant: "capToBudget skips over-long lines and keeps scanning the rest",
@@ -362,7 +362,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "budget-dangling-header",
-		file: "src/inject.ts",
+		file: "src/inject/budget.ts",
 		find: `if (kept.every((l) => l.startsWith("## "))) return "";`,
 		replace: `if (false && kept.every((l) => l.startsWith("## "))) return "";`,
 		invariant: "a block trimmed down to headers is dropped, never injected",
@@ -370,7 +370,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "budget-header-fit-boundary",
-		file: "src/inject.ts",
+		file: "src/inject/budget.ts",
 		find: `if (lines[0].length > budget) return "";`,
 		replace: `if (lines[0].length >= budget) return "";`,
 		invariant: "a header exactly the size of the budget still counts as fitting",
@@ -378,10 +378,10 @@ export const MUTANTS: Mutant[] = [
 		equivalent:
 			"when the header alone fills the budget, no content line can fit either way, and the dangling-header guard below returns \"\" for both builds: observable block content is identical for every (block, budget). An off-by-one at an unobservable boundary; pinning it would only pin the \">\" token, not a behavior.",
 	},
-	// ---- repo identity (src/repokey.ts) ----------------------------------------
+	// ---- repo identity (src/identity/repokey.ts) ----------------------------------------
 	{
 		id: "repokey-colon-form",
-		file: "src/repokey.ts",
+		file: "src/identity/repokey.ts",
 		find: `u = u.replace(":", "/");`,
 		replace: `u = u.replace(":", "-");`,
 		invariant: "every transport form of one remote hashes to one repo key",
@@ -419,7 +419,7 @@ export const MUTANTS: Mutant[] = [
 	// blocklist-visible, restore-check-blind, restore-safety-stale.
 	{
 		id: "lock-noop",
-		file: "src/lock.ts",
+		file: "src/store/lock.ts",
 		find: `  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;`,
 		replace: `  return fn();\n  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;`,
 		invariant: "whole-file rewrites are serialized per store file",
@@ -428,7 +428,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "lock-release-blind",
-		file: "src/lock.ts",
+		file: "src/store/lock.ts",
 		find: `      if ((await Bun.file(lockPath).text()) === token) await unlink(lockPath);`,
 		replace: `      await unlink(lockPath);`,
 		invariant: "a holder never deletes a lock another process took over",
@@ -439,7 +439,7 @@ export const MUTANTS: Mutant[] = [
 		// queue-abandon path); the original single mutant went ambiguous when
 		// both landed. Split into two uniquely-anchored mutants.
 		id: "lock-default-fail",
-		file: "src/lock.ts",
+		file: "src/store/lock.ts",
 		// Re-anchored 2026-10-26: the #107 branch threaded the `now()` seam
 		// through the wait loop, and --validate caught this anchor rot on the
 		// same day it landed (#110's validate earned its keep immediately).
@@ -460,7 +460,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "lock-default-fail-queued",
-		file: "src/lock.ts",
+		file: "src/store/lock.ts",
 		find: L(
 			`      finish();`,
 			`      opts.onEvent?.("timeout", Date.now() - started);`,
@@ -476,7 +476,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "restore-merge-drops",
-		file: "src/undo.ts",
+		file: "src/store/undo.ts",
 		find: L(
 			`        out = snapLines.map((l) => curByKey.get(rowKey(l)) ?? l).concat(`,
 			`          curOwn.filter((l) => !snapByKey.has(rowKey(l))),`,
@@ -489,7 +489,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "restore-escapes-root",
-		file: "src/undo.ts",
+		file: "src/store/undo.ts",
 		find: `  if (!isWithin(rootReal, realTarget)) {`,
 		replace: `  if (false && !isWithin(rootReal, realTarget)) {`,
 		invariant: "a restore cannot write outside the memory root",
@@ -497,7 +497,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "row-ts-any",
-		file: "src/memory.ts",
+		file: "src/store/files/load.ts",
 		find: `  if (!ISO_TS_RE.test(ts) || Number.isNaN(Date.parse(ts))) {`,
 		replace: `  if (false) {`,
 		invariant: "a row whose ts is not an ISO instant is not addressable",
@@ -505,7 +505,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "repo-floor-off",
-		file: "src/memory.ts",
+		file: "src/store/model/visibility.ts",
 		find: `  return m.repo === reader.scope.key || (!!m.repoPath && m.repoPath === reader.scope.path);`,
 		replace: `  return true;`,
 		invariant: "another repo's rows never surface or get deleted here",
@@ -513,7 +513,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "content-cap-off",
-		file: "src/memory.ts",
+		file: "src/store/files/append.ts",
 		find: `  if (input.content.length > MAX_CONTENT_CHARS) {`,
 		replace: `  if (false) {`,
 		invariant: "nothing oversized is persisted (append floor)",
@@ -521,7 +521,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "gate-blocks-ignored",
-		file: "src/gates.ts",
+		file: "src/gate/gate.ts",
 		find: `  if (blockReason) {`,
 		replace: `  if (false) {`,
 		invariant: "a write rejected by a gate never reaches the store",
@@ -529,7 +529,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "gate-dupes-promoted",
-		file: "src/gates.ts",
+		file: "src/gate/gate.ts",
 		find: `    return { action: "collapsed", chain, collapsedWith: collapseMatch.ts };`,
 		replace: `    return { action: "promoted", chain, ts: collapseMatch.ts };`,
 		invariant: "a near-duplicate is collapsed, not stored twice",
@@ -537,7 +537,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "gate-content-cap-off",
-		file: "src/gates.ts",
+		file: "src/gate/gate.ts",
 		find: `  if (candidate.content.length > MAX_CONTENT_CHARS) {`,
 		replace: `  if (false) {`,
 		invariant: "oversized content is blocked with a reason, not stored",
@@ -545,7 +545,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "inject-one-token-shared",
-		file: "src/inject.ts",
+		file: "src/recall/score.ts",
 		find: `  const needShared = query.size >= LONG_QUERY_TOKENS ? 2 : 1;`,
 		replace: `  const needShared = 1;`,
 		invariant: "free-text prompts need two shared concepts to inject",
@@ -553,7 +553,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "inject-frontier-uncapped",
-		file: "src/inject.ts",
+		file: "src/inject/digest.ts",
 		find: `const OPEN_THREAD_LIMIT = 3;`,
 		replace: `const OPEN_THREAD_LIMIT = 500;`,
 		invariant: "only the newest open threads are surfaced",
@@ -569,7 +569,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "import-frontier-any-version",
-		file: "src/portable.ts",
+		file: "src/portable/import.ts",
 		find: `        allowFrontier = hdr.version <= EXPORT_VERSION;`,
 		replace: `        allowFrontier = true;`,
 		invariant: "a newer export header does not grant the frontier exemption",
@@ -577,7 +577,7 @@ export const MUTANTS: Mutant[] = [
 	},
 	{
 		id: "import-open-status-unconditional",
-		file: "src/portable.ts",
+		file: "src/portable/import.ts",
 		find: `    if (c.status === "open" && (!allowFrontier || claimedGlobal || (hadStamp && !currentScope))) {`,
 		replace: `    if (false) {`,
 		invariant: "status:open is honored only under its guards (export header, own repo, current scope)",
@@ -592,7 +592,7 @@ export const MUTANTS: Mutant[] = [
 // anything - the meta-lesson of #68.
 const SELFTEST_MUTANT: Mutant = {
 	id: "selftest-quote-grammar",
-	file: "src/logfmt.ts",
+	file: "src/core/logfmt/format.ts",
 	find: `return /` + QUOTE_CLASS + `/.test(s)`,
 	replace: `return /` + QUOTE_CLASS_PLAIN + `/.test(s)`,
 	invariant: "logfmt quotes any value containing whitespace (calibration plant)",
