@@ -9,9 +9,12 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
-import { appendMemory, loadAll, markSuperseded, snapshotFiles } from "../src/memory.ts";
-import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/repokey.ts";
-import { resetState } from "../src/state.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { snapshotFiles } from "../src/store/files/snapshots.ts"
+import { markSuperseded } from "../src/store/files/supersede.ts";
+import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/identity/repokey.ts";
+import { resetState } from "../src/core/state.ts";
 
 let root: string;
 let a: string;

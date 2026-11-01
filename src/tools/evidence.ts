@@ -2,10 +2,11 @@
 // and handler are byte-identical to the pre-split source; closure access arrives
 // through ToolDeps.
 import type { ToolRegister } from "./deps.ts";
-import { evidenceFileFor } from "../evidence.ts";
-import { parseLine, readLines } from "../logfmt.ts";
-import { evidenceVisibleTo, readerFromSid } from "../memory.ts";
-import { EvidenceArgs, validated } from "../schema.ts";
+import { evidenceFileFor } from "../evidence/record.ts";
+import { parseLine } from "../core/logfmt/format.ts"
+import { readLines } from "../core/logfmt/read.ts";
+import { evidenceVisibleTo, readerFromSid } from "../store/model/visibility.ts";
+import { EvidenceArgs, validated } from "./schema.ts";
 
 export const register: ToolRegister = (editor, deps) => {
   const { toolIds, direct } = deps;

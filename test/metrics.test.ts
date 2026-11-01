@@ -2,9 +2,10 @@
 // how stale a capture is, and how much of the store never gets retrieved.
 // These are reported, never acted on; the tests pin the math and the wording.
 import { describe, expect, test } from "bun:test";
-import { captureLag, fmtBytes, fmtMs, percentile, rowsPerDay } from "../src/status.ts";
-import { lagSince } from "../src/capture.ts";
-import { formatLine } from "../src/logfmt.ts";
+import { fmtBytes, fmtMs } from "../src/status/format.ts"
+import { captureLag, percentile, rowsPerDay } from "../src/status/metrics.ts";
+import { lagSince } from "../src/capture/lag.ts";
+import { formatLine } from "../src/core/logfmt/format.ts";
 
 const at = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000).toISOString();
 

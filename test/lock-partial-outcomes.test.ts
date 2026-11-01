@@ -2,14 +2,17 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { canonicalFile, dateStr, evidenceDir, memoryRoot } from "../src/config.ts";
-import { formatLine, parseLine } from "../src/logfmt.ts";
-import { loadAll, markManySupersededReport, snapshotFiles } from "../src/memory.ts";
-import { LOCK_RESTORE, LOCK_WRITE, lockFileFor, withStoreLock } from "../src/lock.ts";
-import { restoreSnapshot } from "../src/undo.ts";
+import { canonicalFile, evidenceDir, memoryRoot } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { formatLine, parseLine } from "../src/core/logfmt/format.ts";
+import { loadAll } from "../src/store/files/load.ts"
+import { snapshotFiles } from "../src/store/files/snapshots.ts"
+import { markManySupersededReport } from "../src/store/files/supersede.ts";
+import { LOCK_RESTORE, LOCK_WRITE, lockFileFor, withStoreLock } from "../src/store/lock.ts";
+import { restoreSnapshot } from "../src/store/undo.ts";
 import { editMemory } from "../src/viewer/mutate.ts";
-import { resetSessionScopes, setRepoScope } from "../src/repokey.ts";
-import { resetState } from "../src/state.ts";
+import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
+import { resetState } from "../src/core/state.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
 

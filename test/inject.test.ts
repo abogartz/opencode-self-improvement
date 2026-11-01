@@ -4,10 +4,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { memoryRoot } from "../src/config.ts";
-import { formatLine } from "../src/logfmt.ts";
-import { capToBudget, contextualPull, formatMemory, injectedRows, relevantKnowledge, selectRelevant } from "../src/inject.ts";
-import type { Memory } from "../src/memory.ts";
+import { memoryRoot } from "../src/core/config/paths.ts";
+import { formatLine } from "../src/core/logfmt/format.ts";
+import { capToBudget, injectedRows } from "../src/inject/budget.ts"
+import { formatMemory } from "../src/inject/format.ts"
+import { contextualPull } from "../src/inject/pull.ts"
+import { relevantKnowledge, selectRelevant } from "../src/recall/relevant.ts";
+import type { Memory } from "../src/store/model/memory.ts";
 
 let root: string;
 

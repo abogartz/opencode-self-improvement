@@ -1,6 +1,6 @@
 // Compile-time contracts, checked by the existing `bun run typecheck` gate.
 // No runtime fixture or store is needed for this type-only refactor.
-import type { GateOutcome } from "../src/gates.ts";
+import type { GateOutcome } from "../src/gate/gate.ts";
 
 declare function acceptOutcome(outcome: GateOutcome): void;
 declare function acceptString(value: string): void;

@@ -7,9 +7,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin } from "./harness.ts";
-import { resetState } from "../src/state.ts";
-import { loadAll, isActive } from "../src/memory.ts";
-import type { InitSummary } from "../src/init.ts";
+import { resetState } from "../src/core/state.ts";
+import { loadAll } from "../src/store/files/load.ts"
+import { isActive } from "../src/store/model/predicates.ts";
+import type { InitSummary } from "../src/init/run.ts";
 
 let memoryDir: string;
 let fixture: string;
@@ -89,7 +90,7 @@ describe("memory_init", () => {
 
 describe("init internals", () => {
   test("gitRootOf/gitHead degrade on non-git dirs", async () => {
-    const { gitRootOf, gitHead, detectScripts } = await import("../src/init.ts");
+    const { gitRootOf, gitHead, detectScripts } = await import("../src/init/detect.ts");
     expect(await gitRootOf(fixture)).toBe(fixture);
     expect(await gitHead(fixture)).toBe("-");
     const recs = await detectScripts(fixture);
@@ -97,7 +98,8 @@ describe("init internals", () => {
   });
 
   test("formatInit renders a readable summary; runInit returns one", async () => {
-    const { formatInit, runInit } = await import("../src/init.ts");
+    const { formatInit } = await import("../src/init/format.ts")
+const { runInit } = await import("../src/init/run.ts");
     const s: InitSummary = {
       scope: "x",
       root: fixture,

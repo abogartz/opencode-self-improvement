@@ -7,10 +7,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
-import { appendMemory } from "../src/memory.ts";
-import { exportMemories } from "../src/portable.ts";
-import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/repokey.ts";
-import { resetState } from "../src/state.ts";
+import { appendMemory } from "../src/store/files/append.ts";
+import { exportMemories } from "../src/portable/export.ts";
+import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/identity/repokey.ts";
+import { resetState } from "../src/core/state.ts";
 
 let root: string;
 let a: string;

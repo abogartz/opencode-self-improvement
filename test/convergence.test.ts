@@ -15,10 +15,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dateStr, evidenceDir, memoryRoot } from "../src/config.ts";
-import { formatLine, parseLine, type Fields } from "../src/logfmt.ts";
-import { appendMemory } from "../src/memory.ts";
-import { systemDigest } from "../src/inject.ts";
+import { evidenceDir, memoryRoot } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { formatLine, parseLine, type Fields } from "../src/core/logfmt/format.ts";
+import { appendMemory } from "../src/store/files/append.ts";
+import { systemDigest } from "../src/inject/digest.ts";
 import {
   checkNewSession,
   finalizeSession,
@@ -27,9 +28,9 @@ import {
   markTurn,
   onCompacting,
   recentConvergenceSummary,
-} from "../src/triggers.ts";
-import { resetState, setCurrent } from "../src/state.ts";
-import { setRepoScope } from "../src/repokey.ts";
+} from "../src/capture/triggers.ts";
+import { resetState, setCurrent } from "../src/core/state.ts";
+import { setRepoScope } from "../src/identity/repokey.ts";
 import { loadPlugin } from "./harness.ts";
 
 let root: string;
@@ -71,7 +72,7 @@ function field(line: Fields | undefined, key: string): string {
 
 async function engage(sid: string, callID: string, tool: string): Promise<void> {
   setCurrent({ sessionID: sid, callID, tool });
-  const { afterTool } = await import("../src/triggers.ts");
+  const { afterTool } = await import( "../src/capture/triggers.ts");
   await afterTool(
     { tool, sessionID: sid, callID, args: tool === "grep" ? { pattern: "x" } : { filePath: "x.ts" } },
     { output: tool === "grep" ? "3 matches found" : "content", metadata: {} },

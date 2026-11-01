@@ -1,11 +1,13 @@
 // Exercise the real write entry points in a separate process, with only the
 // wait budget shortened. The production timeout policy remains untouched.
-import { appendMemory, clearSuperseded, markManySuperseded, markSuperseded, prune } from "../../src/memory.ts";
-import { addBlock, removeBlock } from "../../src/blocklist.ts";
+import { appendMemory } from "../../src/store/files/append.ts"
+import { prune } from "../../src/store/files/prune.ts"
+import { clearSuperseded, markManySuperseded, markSuperseded } from "../../src/store/files/supersede.ts";
+import { addBlock, removeBlock } from "../../src/store/blocklist.ts";
 import { deleteMemory, unrejectMemory } from "../../src/viewer/mutate.ts";
-import { tombstoneMany } from "../../src/tombstones.ts";
-import { contentHash } from "../../src/evidence.ts";
-import { LOCK_WRITE } from "../../src/lock.ts";
+import { tombstoneMany } from "../../src/store/tombstones/tombstone.ts";
+import { contentHash } from "../../src/evidence/record.ts";
+import { LOCK_WRITE } from "../../src/store/lock.ts";
 import { requireTempPath } from "./temp-root.ts";
 
 const [root, operation, ts] = process.argv.slice(2);

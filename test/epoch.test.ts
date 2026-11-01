@@ -9,16 +9,19 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { dateStr, evidenceDir, frontierBudget, injectBudget, memoryRoot } from "../src/config.ts";
-import { capToBudget, storeVersion } from "../src/inject.ts";
-import { addBlock, removeBlock } from "../src/blocklist.ts";
-import { formatLine, parseLine, type Fields } from "../src/logfmt.ts";
-import { markSuperseded } from "../src/memory.ts";
-import { runWriteGate, type WriteCandidate } from "../src/gates.ts";
-import { afterTool, evidenceCalls, hasEngagement, hasGateCheck } from "../src/triggers.ts";
-import { rememberSessionDir } from "../src/repokey.ts";
-import { resetState, setCurrent } from "../src/state.ts";
-import { SESSION_CAP } from "../src/sessions.ts";
+import { frontierBudget, injectBudget } from "../src/core/config/budgets.ts"
+import { evidenceDir, memoryRoot } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { capToBudget } from "../src/inject/budget.ts"
+import { storeVersion } from "../src/inject/version.ts";
+import { addBlock, removeBlock } from "../src/store/blocklist.ts";
+import { formatLine, parseLine, type Fields } from "../src/core/logfmt/format.ts";
+import { markSuperseded } from "../src/store/files/supersede.ts";
+import { runWriteGate, type WriteCandidate } from "../src/gate/gate.ts";
+import { afterTool, evidenceCalls, hasEngagement, hasGateCheck } from "../src/capture/triggers.ts";
+import { rememberSessionDir } from "../src/identity/repokey.ts";
+import { resetState, setCurrent } from "../src/core/state.ts";
+import { SESSION_CAP } from "../src/core/lru.ts";
 import { loadPlugin } from "./harness.ts";
 
 let root: string;

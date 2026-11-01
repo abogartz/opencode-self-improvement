@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { repoScopeFor, resetSessionScopes, resolveRepo, sessionScope, setRepoScope } from "../src/repokey.ts";
+import { repoScopeFor, resetSessionScopes, resolveRepo, sessionScope, setRepoScope } from "../src/identity/repokey.ts";
 import { loadPlugin } from "./harness.ts";
 import moveRecording from "./fixtures/host-session-move.json";
 

@@ -2,13 +2,17 @@
 // and handler are byte-identical to the pre-split source; closure access arrives
 // through ToolDeps.
 import type { ToolRegister } from "./deps.ts";
-import { neverRetrieved, readLedger } from "../hits.ts";
-import { formatMemory } from "../inject.ts";
-import { isActive, isVisibleTo, loadAll, malformedCount, readerFromSid } from "../memory.ts";
-import { isQuarantined, quarantineReasons } from "../quarantine.ts";
-import { EmptyArgs, validated } from "../schema.ts";
-import { blockedRecent, captureLag, captureLagLines, renderMemoryReport, rowsPerDay } from "../status.ts";
-import type { StoreCounts } from "../status.ts";
+import { neverRetrieved, readLedger } from "../hits/ledger.ts";
+import { formatMemory } from "../inject/format.ts";
+import { loadAll, malformedCount } from "../store/files/load.ts"
+import { isActive } from "../store/model/predicates.ts"
+import { isVisibleTo, readerFromSid } from "../store/model/visibility.ts";
+import { isQuarantined, quarantineReasons } from "../store/quarantine/quarantine.ts";
+import { EmptyArgs, validated } from "./schema.ts";
+import { captureLag, captureLagLines, rowsPerDay } from "../status/metrics.ts"
+import { renderMemoryReport } from "../status/report.ts"
+import { blockedRecent } from "../status/write.ts";
+import type { StoreCounts } from "../status/payload.ts";
 
 export const register: ToolRegister = (editor, deps) => {
   const { toolIds, sessions, direct } = deps;

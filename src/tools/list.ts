@@ -2,9 +2,11 @@
 // and handler are byte-identical to the pre-split source; closure access arrives
 // through ToolDeps.
 import type { ToolRegister } from "./deps.ts";
-import { isInjectable, isVisibleTo, loadAll, readerFromSid } from "../memory.ts";
-import { flattenMemoryText } from "../sanitize.ts";
-import { EmptyArgs, validated } from "../schema.ts";
+import { loadAll } from "../store/files/load.ts"
+import { isInjectable } from "../store/model/predicates.ts"
+import { isVisibleTo, readerFromSid } from "../store/model/visibility.ts";
+import { flattenMemoryText } from "../store/sanitize.ts";
+import { EmptyArgs, validated } from "./schema.ts";
 
 export const register: ToolRegister = (editor, deps) => {
   const { toolIds, direct } = deps;

@@ -4,7 +4,7 @@
 // fix)` read as calls to `json` and `context`, get drift-compared against
 // live code, and block legitimate memory writes with drift_ref_stale_incoming.
 import { describe, expect, test } from "bun:test";
-import { extractCallForms } from "../src/resolver.ts";
+import { extractCallForms } from "../src/gate/resolver.ts";
 
 describe("extractCallForms — prose and file-reference guards", () => {
   test("file reference followed by parenthetical prose is not a call", () => {

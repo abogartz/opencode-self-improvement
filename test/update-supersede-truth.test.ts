@@ -20,10 +20,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
-import { appendMemory, loadAll, markManySuperseded } from "../src/memory.ts";
-import { resetSessionScopes, resolveRepo, setRepoScope } from "../src/repokey.ts";
-import { resetState } from "../src/state.ts";
-import * as evidence from "../src/evidence.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { markManySuperseded } from "../src/store/files/supersede.ts";
+import { resetSessionScopes, resolveRepo, setRepoScope } from "../src/identity/repokey.ts";
+import { resetState } from "../src/core/state.ts";
+import * as evidence from "../src/evidence/record.ts";
 
 let root: string;
 let a: string;
@@ -334,7 +336,7 @@ describe("the successor verdict tells the truth about content and metadata", () 
       status: "open",
       ...stampOf(a),
     });
-    const memory = await import("../src/memory.ts");
+    const memory = await import("../src/store/files/supersede.ts");
     const mark = memory.markSuperseded;
     const spy = spyOn(memory, "markSuperseded").mockImplementationOnce(() => {
       throw new Error("simulated retirement fault");

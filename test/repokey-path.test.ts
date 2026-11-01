@@ -10,10 +10,10 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { normalizeDirPath, resolveRepo, resetSessionScopes, setRepoScope } from "../src/repokey.ts";
-import { appendMemory } from "../src/memory.ts";
-import { resetState } from "../src/state.ts";
-import { relevantKnowledge } from "../src/inject.ts";
+import { normalizeDirPath, resolveRepo, resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
+import { appendMemory } from "../src/store/files/append.ts";
+import { resetState } from "../src/core/state.ts";
+import { relevantKnowledge } from "../src/recall/relevant.ts";
 
 const gitToplevel = (dir: string): string | null => {
   try {

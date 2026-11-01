@@ -4,12 +4,13 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { hitsFile, readLedger, resetHitThrottle, resetLedgerCache } from "../src/hits.ts";
-import { parseLine, readLines } from "../src/logfmt.ts";
-import { appendMemory } from "../src/memory.ts";
-import { resetSessionScopes, setRepoScope } from "../src/repokey.ts";
-import { noteAuthored, resetState } from "../src/state.ts";
-import { readStatus } from "../src/status.ts";
+import { hitsFile, readLedger, resetHitThrottle, resetLedgerCache } from "../src/hits/ledger.ts";
+import { parseLine } from "../src/core/logfmt/format.ts"
+import { readLines } from "../src/core/logfmt/read.ts";
+import { appendMemory } from "../src/store/files/append.ts";
+import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
+import { noteAuthored, resetState } from "../src/core/state.ts";
+import { readStatus } from "../src/status/write.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
 
 const envKeys = [

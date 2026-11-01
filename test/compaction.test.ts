@@ -14,9 +14,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { dateStr, evidenceDir, memoryRoot } from "../src/config.ts";
-import { formatLine, parseLine, type Fields } from "../src/logfmt.ts";
-import { resetState } from "../src/state.ts";
+import { evidenceDir, memoryRoot } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { formatLine, parseLine, type Fields } from "../src/core/logfmt/format.ts";
+import { resetState } from "../src/core/state.ts";
 import { loadPlugin } from "./harness.ts";
 
 let root: string;

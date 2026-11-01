@@ -2,14 +2,15 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dateStr, evidenceDir } from "../src/config.ts";
-import { parseLine } from "../src/logfmt.ts";
-import { runInit } from "../src/init.ts";
+import { evidenceDir } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { parseLine } from "../src/core/logfmt/format.ts";
+import { runInit } from "../src/init/run.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
-import * as gates from "../src/gates.ts";
-import { captureEvidenceContext, record } from "../src/evidence.ts";
-import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/repokey.ts";
-import { resetState, setCurrent } from "../src/state.ts";
+import * as gates from "../src/gate/gate.ts";
+import { captureEvidenceContext, record } from "../src/evidence/record.ts";
+import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/identity/repokey.ts";
+import { resetState, setCurrent } from "../src/core/state.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
 
 let root: string, a: string, b: string;

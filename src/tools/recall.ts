@@ -2,12 +2,14 @@
 // and handler are byte-identical to the pre-split source; closure access arrives
 // through ToolDeps.
 import type { ToolRegister } from "./deps.ts";
-import { record } from "../evidence.ts";
-import { formatMemory } from "../inject.ts";
-import { isInjectable, isVisibleTo, loadAll, readerFromSid } from "../memory.ts";
-import type { Memory } from "../memory.ts";
-import { RecallArgs, validated } from "../schema.ts";
-import { firstFrontierTap, markFrontierTap } from "../triggers.ts";
+import { record } from "../evidence/record.ts";
+import { formatMemory } from "../inject/format.ts";
+import { loadAll } from "../store/files/load.ts"
+import { isInjectable } from "../store/model/predicates.ts"
+import { isVisibleTo, readerFromSid } from "../store/model/visibility.ts";
+import type { Memory } from "../store/model/memory.ts";
+import { RecallArgs, validated } from "./schema.ts";
+import { firstFrontierTap, markFrontierTap } from "../capture/triggers.ts";
 
 function scoreMemory(m: Memory, q: string): number {
   // Same indexed fields as the injection scorer (#40): a row recalled by one of

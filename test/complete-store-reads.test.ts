@@ -2,14 +2,15 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { snapshotFiles, type Memory } from "../src/memory.ts";
-import { removeBlock, blocklistFile } from "../src/blocklist.ts";
-import { hitsFile, recordHits, resetHitThrottle } from "../src/hits.ts";
-import { restoreSnapshot } from "../src/undo.ts";
-import { importMemories } from "../src/portable.ts";
-import { readStatus, statusFile } from "../src/status.ts";
-import { resetState } from "../src/state.ts";
-import { resetSessionScopes, setRepoScope } from "../src/repokey.ts";
+import { snapshotFiles } from "../src/store/files/snapshots.ts"
+import { type Memory } from "../src/store/model/memory.ts";
+import { removeBlock, blocklistFile } from "../src/store/blocklist.ts";
+import { hitsFile, recordHits, resetHitThrottle } from "../src/hits/ledger.ts";
+import { restoreSnapshot } from "../src/store/undo.ts";
+import { importMemories } from "../src/portable/import.ts";
+import { readStatus, statusFile } from "../src/status/write.ts";
+import { resetState } from "../src/core/state.ts";
+import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
 
 let root: string;
 let old: string | undefined;

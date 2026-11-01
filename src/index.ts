@@ -9,54 +9,44 @@
 // the SDK's Plugin type using a type-only import (see the note on `plugin`).
 import type { Cleanup, Plugin } from "@opencode/plugin/promise/plugin";
 import { basename, join } from "node:path";
-import { frontierBudget, injectBudget, memoryRoot } from "./config.ts";
-import {
-  clearSuperseded,
-  evidenceVisibleTo,
-  isActive,
-  isInjectable,
-  isVisibleTo,
-  loadAll,
-  malformedCount,
-  markManySuperseded,
-  markSuperseded,
-  readerFromSid,
-  resolveMemoryTarget,
-  snapshotFiles,
-  unresolvedWriteMessage,
-  type Memory,
-} from "./memory.ts";
-import { auditCaveat, runWriteGate, sameStrList, type GateContext, type WriteCandidate } from "./gates.ts";
-import { withStoreLock } from "./lock.ts";
-import { isQuarantined, quarantineCandidate, quarantineReasons } from "./quarantine.ts";
-import { pruneMemory } from "./prune.ts";
-import { exportMemories, findStaleOpen, importMemories } from "./portable.ts";
-import { listSnapshots, restoreSnapshot } from "./undo.ts";
-import { SESSION_CAP, SessionLru } from "./sessions.ts";
-import { captureEvidenceContext, evidenceFileFor, record, recordCaptureLag } from "./evidence.ts";
-import { proposeConsolidations, renderProposals } from "./consolidate.ts";
-import { readReads } from "./hits.ts";
-import {
-  compactionAnchor,
-  contextualPull,
-  formatMemory,
-  pullQuery,
-  sharedTerms,
-} from "./inject.ts";
-import { createInjectionEpochs } from "./injection-epochs.ts";
+import { frontierBudget, injectBudget } from "./core/config/budgets.ts"
+import { memoryRoot } from "./core/config/paths.ts";
+import { unresolvedWriteMessage } from "./store/files/append.ts"
+import { loadAll, malformedCount } from "./store/files/load.ts"
+import { snapshotFiles } from "./store/files/snapshots.ts"
+import { clearSuperseded, markManySuperseded, markSuperseded } from "./store/files/supersede.ts"
+import { resolveMemoryTarget } from "./store/files/target.ts"
+import { type Memory } from "./store/model/memory.ts"
+import { isActive, isInjectable } from "./store/model/predicates.ts"
+import { evidenceVisibleTo, isVisibleTo, readerFromSid } from "./store/model/visibility.ts";
+import { auditCaveat, runWriteGate, sameStrList, type GateContext, type WriteCandidate } from "./gate/gate.ts";
+import { withStoreLock } from "./store/lock.ts";
+import { isQuarantined, quarantineCandidate, quarantineReasons } from "./store/quarantine/quarantine.ts";
+import { pruneMemory } from "./store/prune.ts";
+import { findStaleOpen } from "./portable/decay.ts"
+import { exportMemories } from "./portable/export.ts"
+import { importMemories } from "./portable/import.ts";
+import { listSnapshots, restoreSnapshot } from "./store/undo.ts";
+import { SESSION_CAP, SessionLru } from "./core/lru.ts";
+import { captureEvidenceContext, evidenceFileFor, record, recordCaptureLag } from "./evidence/record.ts";
+import { proposeConsolidations } from "./consolidate/propose.ts"
+import { renderProposals } from "./consolidate/render.ts";
+import { readReads } from "./hits/ledger.ts";
+import { compactionAnchor } from "./inject/anchor.ts"
+import { formatMemory } from "./inject/format.ts"
+import { contextualPull } from "./inject/pull.ts"
+import { pullQuery } from "./recall/relevant.ts"
+import { sharedTerms } from "./recall/shared-terms.ts";
+import { createInjectionEpochs } from "./inject/epochs.ts";
 import { registerMemoryTools } from "./tools/registry.ts";
-import { readLedger, neverRetrieved, recordHits, useSignals, type HitSource } from "./hits.ts";
-import { formatInit, runInit } from "./init.ts";
-import { ensureInitCommand, ensureMemoryReportCommand } from "./command.ts";
-import {
-  blockedRecent,
-  renderMemoryReport,
-  type Measured,
-  captureLag,
-  captureLagLines,
-  rowsPerDay,
-  type StoreCounts,
-} from "./status.ts";
+import { readLedger, neverRetrieved, recordHits, useSignals, type HitSource } from "./hits/ledger.ts";
+import { formatInit } from "./init/format.ts"
+import { runInit } from "./init/run.ts";
+import { ensureInitCommand, ensureMemoryReportCommand } from "./command/ensure.ts";
+import { captureLag, captureLagLines, rowsPerDay } from "./status/metrics.ts"
+import { type Measured, type StoreCounts } from "./status/payload.ts"
+import { renderMemoryReport } from "./status/report.ts"
+import { blockedRecent } from "./status/write.ts";
 import {
   afterTool,
   checkNewSession,
@@ -67,14 +57,18 @@ import {
   markFrontierTap,
   markTurn,
   onCompacting,
-} from "./triggers.ts";
-import { getCurrent, setCurrent } from "./state.ts";
-import { resolveRepo, setRepoScope, rememberSessionDir, sessionDir, sessionDirFirm, bindSessionProvisional, writeTarget } from "./repokey.ts";
-import { parseLine, readLines } from "./logfmt.ts";
-import { buildCapturePrompt, flattenTranscript, lagSince, parseCandidates, parseModelRef } from "./capture.ts";
-import { redactSecrets } from "./secrets.ts";
-import { flattenMemoryText } from "./sanitize.ts";
-import { bunFloorWarning } from "./runtime.ts";
+} from "./capture/triggers.ts";
+import { getCurrent, setCurrent } from "./core/state.ts";
+import { resolveRepo, setRepoScope, rememberSessionDir, sessionDir, sessionDirFirm, bindSessionProvisional, writeTarget } from "./identity/repokey.ts";
+import { parseLine } from "./core/logfmt/format.ts"
+import { readLines } from "./core/logfmt/read.ts";
+import { parseCandidates, parseModelRef } from "./capture/candidates.ts"
+import { lagSince } from "./capture/lag.ts"
+import { buildCapturePrompt } from "./capture/prompt.ts"
+import { flattenTranscript } from "./capture/transcript.ts";
+import { redactSecrets } from "./store/secrets.ts";
+import { flattenMemoryText } from "./store/sanitize.ts";
+import { bunFloorWarning } from "./core/runtime.ts";
 import {
   captureSessionID,
   sessionDirectoryFromMessages,
@@ -82,7 +76,7 @@ import {
   sessionIdentityEvent,
   sessionUsageEvent,
   toolIdentity,
-} from "./host.ts";
+} from "./identity/host-events.ts";
 
 // Tool/input boundaries are zod schemas (src/schema.ts): the JSON Schema the
 // host sees is GENERATED from them, and raw args are re-parsed at execution.
@@ -101,7 +95,7 @@ import {
   UndoArgs,
   UpdateArgs,
   validated,
-} from "./schema.ts";
+} from "./tools/schema.ts";
 
 // --- OpenCode V2 runtime shapes (loose: we only read a few fields) ----------
 interface ToolDef {

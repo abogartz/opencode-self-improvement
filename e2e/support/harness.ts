@@ -323,7 +323,7 @@ export function tuiJsxSource(installedDir: string): string {
   const scratch = mkdtempSync(join(tmpdir(), "psi-e2e-tui-"));
   const out = join(scratch, "out.js");
   const p = Bun.spawnSync(
-    ["bun", "build", join(installedDir, "src", "tui.tsx"), "--target=bun", "--packages=external", "--outfile", out],
+    ["bun", "build", join(installedDir, "src", "tui", "panel.tsx"), "--target=bun", "--packages=external", "--outfile", out],
     { cwd: scratch },
   );
   if (p.exitCode !== 0) throw new Error(`tui compile failed: ${p.stderr}`);
