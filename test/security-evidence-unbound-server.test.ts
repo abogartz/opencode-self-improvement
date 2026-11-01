@@ -15,10 +15,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
-import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/repokey.ts";
-import { resetState } from "../src/state.ts";
+import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/identity/repokey.ts";
+import { resetState } from "../src/core/state.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
-import { dateStr, evidenceDir } from "../src/config.ts";
+import { evidenceDir } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
 
 let root: string;
 let b: string;

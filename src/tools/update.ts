@@ -2,14 +2,18 @@
 // and handler are byte-identical to the pre-split source; closure access arrives
 // through ToolDeps.
 import type { ToolRegister } from "./deps.ts";
-import { memoryRoot } from "../config.ts";
-import { record } from "../evidence.ts";
-import { auditCaveat, runWriteGate, sameStrList } from "../gates.ts";
-import { withStoreLock } from "../lock.ts";
-import { isActive, isVisibleTo, loadAll, markSuperseded, readerFromSid, resolveMemoryTarget } from "../memory.ts";
-import type { Memory } from "../memory.ts";
-import { UpdateArgs, validated } from "../schema.ts";
-import { redactSecrets } from "../secrets.ts";
+import { memoryRoot } from "../core/config/paths.ts";
+import { record } from "../evidence/record.ts";
+import { auditCaveat, runWriteGate, sameStrList } from "../gate/gate.ts";
+import { withStoreLock } from "../store/lock.ts";
+import { loadAll } from "../store/files/load.ts"
+import { markSuperseded } from "../store/files/supersede.ts"
+import { resolveMemoryTarget } from "../store/files/target.ts"
+import { isActive } from "../store/model/predicates.ts"
+import { isVisibleTo, readerFromSid } from "../store/model/visibility.ts";
+import type { Memory } from "../store/model/memory.ts";
+import { UpdateArgs, validated } from "./schema.ts";
+import { redactSecrets } from "../store/secrets.ts";
 import { join } from "node:path";
 
 export const register: ToolRegister = (editor, deps) => {

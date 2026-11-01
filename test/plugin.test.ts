@@ -6,9 +6,9 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pluginDefault, { SelfImprovement } from "../index.ts";
-import { memoryRoot } from "../src/config.ts";
-import { formatLine } from "../src/logfmt.ts";
-import { resetState } from "../src/state.ts";
+import { memoryRoot } from "../src/core/config/paths.ts";
+import { formatLine } from "../src/core/logfmt/format.ts";
+import { resetState } from "../src/core/state.ts";
 import { loadPlugin } from "./harness.ts";
 
 let root: string;

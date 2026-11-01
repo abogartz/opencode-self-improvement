@@ -3,9 +3,11 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { dateStr, memoryRoot } from "../src/config.ts";
-import { appendMemory } from "../src/memory.ts";
-import { formatLine, parseLine, readLines } from "../src/logfmt.ts";
+import { memoryRoot } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { appendMemory } from "../src/store/files/append.ts";
+import { formatLine, parseLine } from "../src/core/logfmt/format.ts"
+import { readLines } from "../src/core/logfmt/read.ts";
 
 let root: string;
 let file: string;

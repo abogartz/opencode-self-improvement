@@ -12,9 +12,11 @@ import { appendFile } from "node:fs/promises";
 import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendMemory, loadAll, markManySuperseded, markSuperseded } from "../src/memory.ts";
-import { formatLine } from "../src/logfmt.ts";
-import { setRepoScope } from "../src/repokey.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { markManySuperseded, markSuperseded } from "../src/store/files/supersede.ts";
+import { formatLine } from "../src/core/logfmt/format.ts";
+import { setRepoScope } from "../src/identity/repokey.ts";
 
 let root: string;
 beforeEach(() => {

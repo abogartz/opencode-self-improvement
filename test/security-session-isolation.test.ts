@@ -10,14 +10,14 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
-import { appendMemory } from "../src/memory.ts";
+import { appendMemory } from "../src/store/files/append.ts";
 import {
   rememberSessionDir,
   resetSessionScopes,
   resolveRepo,
   setRepoScope,
-} from "../src/repokey.ts";
-import { resetState } from "../src/state.ts";
+} from "../src/identity/repokey.ts";
+import { resetState } from "../src/core/state.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
 
 let root: string;

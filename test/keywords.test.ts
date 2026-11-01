@@ -10,20 +10,19 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { memoryRoot } from "../src/config.ts";
-import { formatLine } from "../src/logfmt.ts";
-import {
-  appendMemory,
-  loadAll,
-  MAX_KEYWORD_CHARS,
-  MAX_KEYWORDS,
-  normalizeKeywords,
-} from "../src/memory.ts";
-import { formatMemory, relevantKnowledge, scoreMemories } from "../src/inject.ts";
-import { runWriteGate } from "../src/gates.ts";
-import { exportMemories, importMemories } from "../src/portable.ts";
-import { setRepoScope } from "../src/repokey.ts";
-import type { Memory } from "../src/memory.ts";
+import { memoryRoot } from "../src/core/config/paths.ts";
+import { formatLine } from "../src/core/logfmt/format.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { MAX_KEYWORDS, MAX_KEYWORD_CHARS, normalizeKeywords } from "../src/store/model/memory.ts";
+import { formatMemory } from "../src/inject/format.ts"
+import { relevantKnowledge } from "../src/recall/relevant.ts"
+import { scoreMemories } from "../src/recall/score.ts";
+import { runWriteGate } from "../src/gate/gate.ts";
+import { exportMemories } from "../src/portable/export.ts"
+import { importMemories } from "../src/portable/import.ts";
+import { setRepoScope } from "../src/identity/repokey.ts";
+import type { Memory } from "../src/store/model/memory.ts";
 import { loadPlugin } from "./harness.ts";
 
 let root: string;

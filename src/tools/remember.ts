@@ -2,9 +2,9 @@
 // and handler are byte-identical to the pre-split source; closure access arrives
 // through ToolDeps.
 import type { ToolRegister } from "./deps.ts";
-import { auditCaveat, runWriteGate } from "../gates.ts";
-import type { WriteCandidate } from "../gates.ts";
-import { RememberArgs, validated } from "../schema.ts";
+import { auditCaveat, runWriteGate } from "../gate/gate.ts";
+import type { WriteCandidate } from "../gate/gate.ts";
+import { RememberArgs, validated } from "./schema.ts";
 
 export const register: ToolRegister = (editor, deps) => {
   const { toolIds, bindSessionIdentity, ownerlessWriter, refuseOwnerlessWrite, gateContext, direct } = deps;

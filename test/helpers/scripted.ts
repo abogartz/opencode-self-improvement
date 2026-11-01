@@ -14,11 +14,12 @@ import { expect } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { dateStr, memoryRoot, snapshotDir } from "../../src/config.ts";
-import { parseLine, type Fields } from "../../src/logfmt.ts";
-import { snapshotFiles } from "../../src/memory.ts";
-import { rememberSessionDir } from "../../src/repokey.ts";
-import { resetState, setCurrent } from "../../src/state.ts";
+import { memoryRoot, snapshotDir } from "../../src/core/config/paths.ts"
+import { dateStr } from "../../src/core/time.ts";
+import { parseLine, type Fields } from "../../src/core/logfmt/format.ts";
+import { snapshotFiles } from "../../src/store/files/snapshots.ts";
+import { rememberSessionDir } from "../../src/identity/repokey.ts";
+import { resetState, setCurrent } from "../../src/core/state.ts";
 import { startViewer, type ViewerServer } from "../../src/viewer/server.ts";
 import { loadPlugin, type LoadedPlugin } from "../harness.ts";
 

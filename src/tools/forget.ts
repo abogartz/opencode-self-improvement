@@ -2,8 +2,8 @@
 // and handler are byte-identical to the pre-split source; closure access arrives
 // through ToolDeps.
 import type { ToolRegister } from "./deps.ts";
-import { pruneMemory } from "../prune.ts";
-import { ForgetArgs, validated } from "../schema.ts";
+import { pruneMemory } from "../store/prune.ts";
+import { ForgetArgs, validated } from "./schema.ts";
 
 export const register: ToolRegister = (editor, deps) => {
   const { toolIds, direct } = deps;

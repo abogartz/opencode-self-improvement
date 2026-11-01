@@ -17,10 +17,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
-import { addBlock, blocklistFile } from "../src/blocklist.ts";
-import { memoryRoot, snapshotDir } from "../src/config.ts";
-import { loadAll, prune, snapshotFiles } from "../src/memory.ts";
-import { listSnapshots, restoreSnapshot } from "../src/undo.ts";
+import { addBlock, blocklistFile } from "../src/store/blocklist.ts";
+import { memoryRoot, snapshotDir } from "../src/core/config/paths.ts";
+import { loadAll } from "../src/store/files/load.ts"
+import { prune } from "../src/store/files/prune.ts"
+import { snapshotFiles } from "../src/store/files/snapshots.ts";
+import { listSnapshots, restoreSnapshot } from "../src/store/undo.ts";
 import { loadPlugin } from "./harness.ts";
 
 const DAY = "2026-01-01";

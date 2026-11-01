@@ -2,10 +2,10 @@
 // and handler are byte-identical to the pre-split source; closure access arrives
 // through ToolDeps.
 import type { ToolRegister } from "./deps.ts";
-import { memoryRoot } from "../config.ts";
-import { readerFromSid } from "../memory.ts";
-import { UndoArgs, validated } from "../schema.ts";
-import { listSnapshots, restoreSnapshot } from "../undo.ts";
+import { memoryRoot } from "../core/config/paths.ts";
+import { readerFromSid } from "../store/model/visibility.ts";
+import { UndoArgs, validated } from "./schema.ts";
+import { listSnapshots, restoreSnapshot } from "../store/undo.ts";
 import { basename } from "node:path";
 
 export const register: ToolRegister = (editor, deps) => {

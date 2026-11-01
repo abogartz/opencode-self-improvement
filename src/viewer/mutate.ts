@@ -6,21 +6,21 @@
 // and the old entry stays visible as superseded. Block is the poison
 // intervention: keep the entry on disk but hide it from every read path.
 // All mutations require a reason and write audit + evidence lines.
-import { deletionsFile } from "../config.ts";
-import { addBlock, removeBlock } from "../blocklist.ts";
-import { record, chainId, contentHash } from "../evidence.ts";
-import { removeTombstone, tombstone } from "../tombstones.ts";
-import { redactSecrets } from "../secrets.ts";
-import { appendLog, fileIdentity, formatLine, parseLine, readLines, writeAtomic } from "../logfmt.ts";
-import { withStoreLock, LOCK_WRITE } from "../lock.ts";
-import {
-  appendMemory,
-  loadAll,
-  markSuperseded,
-  snapshotFiles,
-  releaseQuarantine,
-  type Memory,
-} from "../memory.ts";
+import { deletionsFile } from "../core/config/paths.ts";
+import { addBlock, removeBlock } from "../store/blocklist.ts";
+import { record, chainId, contentHash } from "../evidence/record.ts";
+import { removeTombstone, tombstone } from "../store/tombstones/tombstone.ts";
+import { redactSecrets } from "../store/secrets.ts";
+import { formatLine, parseLine } from "../core/logfmt/format.ts"
+import { appendLog, fileIdentity, writeAtomic } from "../core/logfmt/publish.ts"
+import { readLines } from "../core/logfmt/read.ts";
+import { withStoreLock, LOCK_WRITE } from "../store/lock.ts";
+import { appendMemory } from "../store/files/append.ts"
+import { loadAll } from "../store/files/load.ts"
+import { snapshotFiles } from "../store/files/snapshots.ts"
+import { markSuperseded } from "../store/files/supersede.ts"
+import { type Memory } from "../store/model/memory.ts"
+import { releaseQuarantine } from "../store/quarantine/release.ts";
 
 export interface EditInput {
   ts: string;

@@ -46,16 +46,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { dateStr, memoryRoot, snapshotDir } from "../src/config.ts";
-import { runWriteGate, type GateContext } from "../src/gates.ts";
-import { formatLine } from "../src/logfmt.ts";
-import { prune, snapshotFiles } from "../src/memory.ts";
-import {
-	EXPORT_HEADER,
-	EXPORT_VERSION,
-	importMemories,
-} from "../src/portable.ts";
-import { restoreSnapshot } from "../src/undo.ts";
+import { memoryRoot, snapshotDir } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { runWriteGate, type GateContext } from "../src/gate/gate.ts";
+import { formatLine } from "../src/core/logfmt/format.ts";
+import { prune } from "../src/store/files/prune.ts"
+import { snapshotFiles } from "../src/store/files/snapshots.ts";
+import { EXPORT_HEADER, EXPORT_VERSION } from "../src/portable/export.ts"
+import { importMemories } from "../src/portable/import.ts";
+import { restoreSnapshot } from "../src/store/undo.ts";
 import { startViewer, type ViewerServer } from "../src/viewer/server.ts";
 
 const SRC = join(import.meta.dir, "..", "src");
@@ -153,7 +152,7 @@ function spawnRacer(label: string, rows: number): Writer {
 	writeFileSync(
 		script,
 		`${childPreamble(label)}
-const { appendMemory } = await import(${JSON.stringify(join(SRC, "memory.ts"))});
+const { appendMemory } = await import(${JSON.stringify(join(SRC, "store/files/append.ts"))});
 for (let i = 0; i < ${rows}; i++) {
   const ts = await appendMemory({
     type: "learning",
@@ -182,7 +181,7 @@ function spawnSuperseder(label: string, targets: string[]): Writer {
 	writeFileSync(
 		script,
 		`${childPreamble(label)}
-const { markSuperseded } = await import(${JSON.stringify(join(SRC, "memory.ts"))});
+const { markSuperseded } = await import(${JSON.stringify(join(SRC, "store/files/supersede.ts"))});
 for (const ts of ${JSON.stringify(targets)}) {
   const ok = await markSuperseded(ts, { superseded_by: "${label}", reason: "consistency" });
   appendFileSync(${JSON.stringify(report)}, ts + (ok ? " ok" : " miss") + "\\n");

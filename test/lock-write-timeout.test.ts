@@ -4,14 +4,17 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendMemory, loadAll, markSuperseded } from "../src/memory.ts";
-import { addBlock, blocklistFile } from "../src/blocklist.ts";
-import { LOCK_WRITE, lockFileFor, withStoreLock } from "../src/lock.ts";
-import { writeAtomic } from "../src/logfmt.ts";
-import { resetSessionScopes, setRepoScope } from "../src/repokey.ts";
-import { resetState } from "../src/state.ts";
-import { rejectedFile, resetTombstoneCache, tombstoneMany, tombstones } from "../src/tombstones.ts";
-import { contentHash } from "../src/evidence.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { markSuperseded } from "../src/store/files/supersede.ts";
+import { addBlock, blocklistFile } from "../src/store/blocklist.ts";
+import { LOCK_WRITE, lockFileFor, withStoreLock } from "../src/store/lock.ts";
+import { writeAtomic } from "../src/core/logfmt/publish.ts";
+import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
+import { resetState } from "../src/core/state.ts";
+import { rejectedFile } from "../src/store/tombstones/rejection.ts"
+import { resetTombstoneCache, tombstoneMany, tombstones } from "../src/store/tombstones/tombstone.ts";
+import { contentHash } from "../src/evidence/record.ts";
 
 let root: string;
 const originalRoot = process.env.OPENCODE_MEMORY_DIR;

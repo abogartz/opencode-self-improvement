@@ -11,9 +11,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rememberSessionDir, repoScopeFor, resetSessionScopes, resolveRepo, setRepoScope } from "../src/repokey.ts";
-import { appendMemory, isVisibleHere, loadAll } from "../src/memory.ts";
-import { resetState, setCurrent } from "../src/state.ts";
+import { rememberSessionDir, repoScopeFor, resetSessionScopes, resolveRepo, setRepoScope } from "../src/identity/repokey.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { isVisibleHere } from "../src/store/model/visibility.ts";
+import { resetState, setCurrent } from "../src/core/state.ts";
 import { loadPlugin } from "./harness.ts";
 
 const MODULE_SCOPE = { key: "mod111", path: "/work/module" };

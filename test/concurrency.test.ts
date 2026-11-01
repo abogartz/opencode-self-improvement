@@ -8,10 +8,15 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { memoryRoot } from "../src/config.ts";
-import { appendMemory, loadAll, markSuperseded, prune, snapshotFiles } from "../src/memory.ts";
-import { parseLine, readLines } from "../src/logfmt.ts";
-import { restoreSnapshot } from "../src/undo.ts";
+import { memoryRoot } from "../src/core/config/paths.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { prune } from "../src/store/files/prune.ts"
+import { snapshotFiles } from "../src/store/files/snapshots.ts"
+import { markSuperseded } from "../src/store/files/supersede.ts";
+import { parseLine } from "../src/core/logfmt/format.ts"
+import { readLines } from "../src/core/logfmt/read.ts";
+import { restoreSnapshot } from "../src/store/undo.ts";
 
 const DAY = new Date().toISOString().slice(0, 10);
 const store = () => join(memoryRoot(), `${DAY}.logfmt`);

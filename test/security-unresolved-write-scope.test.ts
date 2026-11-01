@@ -13,12 +13,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
-import { appendMemory, loadAll } from "../src/memory.ts";
-import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/repokey.ts";
-import { resetState } from "../src/state.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts";
+import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/identity/repokey.ts";
+import { resetState } from "../src/core/state.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
-import { dateStr, evidenceDir, exportsDir } from "../src/config.ts";
-import { parseLine, type Fields } from "../src/logfmt.ts";
+import { evidenceDir, exportsDir } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { parseLine, type Fields } from "../src/core/logfmt/format.ts";
 
 // status:"open" is the planning-thread home: a settled claim would be blocked
 // by GATE-4 for having no code refs, and the test would prove nothing about the

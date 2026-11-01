@@ -20,12 +20,17 @@ import { MEMORY_TOOLS } from "./support/harness.ts";
 const E2E_DIR = import.meta.dir;
 const SRC_ROOT = join(E2E_DIR, "..", "src");
 
-/** Registration sources: the entry point plus the per-tool modules (#168). */
+/** Registration sources: every module under src/, recursively (#168 layout). */
 function registrationSources(): string {
-  let text = readFileSync(join(SRC_ROOT, "index.ts"), "utf8");
-  for (const f of readdirSync(join(SRC_ROOT, "tools")))
-    if (f.endsWith(".ts") && f !== "deps.ts" && f !== "registry.ts")
-      text += readFileSync(join(SRC_ROOT, "tools", f), "utf8");
+  let text = "";
+  const walk = (dir: string) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, f.name);
+      if (f.isDirectory()) walk(p);
+      else if (f.name.endsWith(".ts") && f.name !== "deps.ts" && f.name !== "registry.ts") text += readFileSync(p, "utf8");
+    }
+  };
+  walk(SRC_ROOT);
   return text;
 }
 

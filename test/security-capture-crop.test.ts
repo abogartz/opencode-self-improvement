@@ -10,10 +10,10 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { flattenTranscript } from "../src/capture.ts";
-import { appendMemory } from "../src/memory.ts";
-import { resetState } from "../src/state.ts";
-import { resetSessionScopes, setRepoScope } from "../src/repokey.ts";
+import { flattenTranscript } from "../src/capture/transcript.ts";
+import { appendMemory } from "../src/store/files/append.ts";
+import { resetState } from "../src/core/state.ts";
+import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
 

@@ -17,14 +17,18 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dateStr, evidenceDir, memoryRoot } from "../src/config.ts";
-import { formatLine, parseLine, readLines, type Fields } from "../src/logfmt.ts";
-import { appendMemory, isActive, loadAll } from "../src/memory.ts";
-import { runWriteGate, type GateContext } from "../src/gates.ts";
-import { afterTool, evidenceCalls, hasEngagement, hasGateCheck } from "../src/triggers.ts";
-import { systemDigest } from "../src/inject.ts";
-import { resetState, setCurrent } from "../src/state.ts";
-import { rememberSessionDir, setRepoScope } from "../src/repokey.ts";
+import { evidenceDir, memoryRoot } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { formatLine, parseLine, type Fields } from "../src/core/logfmt/format.ts"
+import { readLines } from "../src/core/logfmt/read.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { isActive } from "../src/store/model/predicates.ts";
+import { runWriteGate, type GateContext } from "../src/gate/gate.ts";
+import { afterTool, evidenceCalls, hasEngagement, hasGateCheck } from "../src/capture/triggers.ts";
+import { systemDigest } from "../src/inject/digest.ts";
+import { resetState, setCurrent } from "../src/core/state.ts";
+import { rememberSessionDir, setRepoScope } from "../src/identity/repokey.ts";
 import { loadPlugin } from "./harness.ts";
 
 let root: string;
@@ -270,7 +274,7 @@ describe("store robustness — malformed evidence and cross-session writes", () 
       ].join("\n") + "\n",
     );
     // Clobber the current-session store with noise too, then roll a real tap.
-    const { recentConvergenceSummary } = await import("../src/triggers.ts");
+    const { recentConvergenceSummary } = await import( "../src/capture/triggers.ts");
     const summary = await recentConvergenceSummary(6);
     expect(summary).toContain("2 sessions tracked");
     expect(summary).toContain("1 reached the frontier");
