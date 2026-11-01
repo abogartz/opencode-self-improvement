@@ -25,6 +25,7 @@ export const MEMORY_TOOLS = [
   "memory_remember",
   "memory_status",
   "memory_undo",
+  "memory_update",
 ];
 
 // Load failures from the real host surface in stderr in these shapes; any
