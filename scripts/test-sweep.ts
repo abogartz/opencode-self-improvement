@@ -909,7 +909,7 @@ async function runSuite(dir: string): Promise<SuiteRun> {
 	const outcome = await Promise.race([proc.exited, Bun.sleep(TIMEOUT_S * 1000 + 30_000).then(() => "stuck" as const)]);
 	if (outcome === "stuck") {
 		try {
-			proc.kill(true);
+			proc.kill("SIGKILL");
 		} catch {
 			/* gone */
 		}
@@ -1085,7 +1085,7 @@ async function sweepMutant(dir: string, m: Mutant, baselineFail: Set<string>, ba
 				applyMutant(dir, m);
 				r = await oneRun();
 			}
-			if (r !== "ok" && typeof r !== "object") {
+			if (typeof r !== "object") {
 				return {
 					m, status: r, runsKilled, runs, killers: [],
 					notes: [r === "compile-error" ? "informational, never a kill (#70)" : "suite could not load the mutated tree"],
