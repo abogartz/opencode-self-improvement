@@ -8,12 +8,19 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setRepoScope } from "../src/repokey.ts";
-import { normalizeRemote } from "../src/repokey.ts";
-import { appendMemory, loadAll, prune } from "../src/memory.ts";
-import { relevantKnowledge, systemDigest, storeVersion, contextualPull } from "../src/inject.ts";
-import { findStaleOpen, importMemories, exportMemories } from "../src/portable.ts";
-import { runWriteGate } from "../src/gates.ts";
+import { setRepoScope } from "../src/identity/repokey.ts";
+import { normalizeRemote } from "../src/identity/repokey.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { prune } from "../src/store/files/prune.ts";
+import { systemDigest } from "../src/inject/digest.ts"
+import { contextualPull } from "../src/inject/pull.ts"
+import { storeVersion } from "../src/inject/version.ts"
+import { relevantKnowledge } from "../src/recall/relevant.ts";
+import { findStaleOpen } from "../src/portable/decay.ts"
+import { exportMemories } from "../src/portable/export.ts"
+import { importMemories } from "../src/portable/import.ts";
+import { runWriteGate } from "../src/gate/gate.ts";
 
 const REPO_A = { key: "aaa111", path: "/work/alpha" };
 const REPO_B = { key: "bbb222", path: "/work/beta" };
@@ -70,7 +77,8 @@ describe("visibility at the model-facing sinks", () => {
     expect(await knowledgeFor("how do I deploy to staging?")).toContain("runbook");
 
     // A raw legacy row (no repo field on disk) stays visible everywhere.
-    const { appendLog, formatLine } = await import("../src/logfmt.ts");
+    const { formatLine } = await import("../src/core/logfmt/format.ts")
+const { appendLog } = await import("../src/core/logfmt/publish.ts");
     await appendLog(dayFile(), formatLine({ ts: "2025-01-01T00:00:00.000Z", type: "learning", scope: "ops", content: "legacy staging note from before scoping" }));
     expect(await knowledgeFor("how do I deploy to staging?")).toContain("legacy staging note");
   });

@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkablePathRefs, gate1 } from "../src/resolver.ts";
-import { runWriteGate, type GateContext } from "../src/gates.ts";
+import { checkablePathRefs, gate1 } from "../src/gate/resolver.ts";
+import { runWriteGate, type GateContext } from "../src/gate/gate.ts";
 
 describe("checkablePathRefs — which refs are policed", () => {
   test("repo-qualified paths are checkable; line suffix stripped", () => {

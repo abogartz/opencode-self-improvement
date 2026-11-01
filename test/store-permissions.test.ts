@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { memoryRoot } from "../src/config.ts";
-import { appendLog, ensureDir, writeAtomic } from "../src/logfmt.ts";
-import { snapshotFiles } from "../src/memory.ts";
-import { withStoreLock, lockFileFor, LOCK_WRITE } from "../src/lock.ts";
-import { preparePrivateFile } from "../src/permissions.ts";
-import { readStatus, writeStatus, statusFile, sessionStatusFile, type StatusPayload } from "../src/status.ts";
+import { memoryRoot } from "../src/core/config/paths.ts";
+import { appendLog, ensureDir, writeAtomic } from "../src/core/logfmt/publish.ts";
+import { snapshotFiles } from "../src/store/files/snapshots.ts";
+import { withStoreLock, lockFileFor, LOCK_WRITE } from "../src/store/lock.ts";
+import { preparePrivateFile } from "../src/core/permissions.ts";
+import { readStatus, writeStatus, statusFile, sessionStatusFile } from "../src/status/write.ts";
+import { type StatusPayload } from "../src/status/payload.ts";
 
 // Windows chmod does not represent ACL privacy. Exercise these guarantees on
 // POSIX with a permissive umask, rather than passing vacuous Windows checks.

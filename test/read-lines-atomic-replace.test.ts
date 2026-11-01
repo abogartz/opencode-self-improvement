@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readLines } from "../src/logfmt.ts";
+import { readLines } from "../src/core/logfmt/read.ts";
 
 let root: string;
 beforeEach(() => {

@@ -18,9 +18,9 @@
 // every write, so this is belt-and-braces against a verdict surviving a store
 // that no longer exists.
 import { afterEach } from "bun:test";
-import { resetSessionScopes } from "../src/repokey.ts";
-import { resetState } from "../src/state.ts";
-import { resetTombstoneCache } from "../src/tombstones.ts";
+import { resetSessionScopes } from "../src/identity/repokey.ts";
+import { resetState } from "../src/core/state.ts";
+import { resetTombstoneCache } from "../src/store/tombstones/tombstone.ts";
 
 afterEach(() => {
   resetState();

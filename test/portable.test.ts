@@ -21,14 +21,19 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { dateStr, evidenceDir, exportsDir, memoryRoot, snapshotDir } from "../src/config.ts";
-import { formatLine, parseLine, type Fields } from "../src/logfmt.ts";
-import { resetState } from "../src/state.ts";
-import { appendMemory, isActive, loadAll } from "../src/memory.ts";
-import type { WriteCandidate } from "../src/gates.ts";
-import { exportMemories, findStaleOpen, importMemories } from "../src/portable.ts";
-import { setRepoScope } from "../src/repokey.ts";
-import { systemDigest } from "../src/inject.ts";
+import { evidenceDir, exportsDir, memoryRoot, snapshotDir } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { formatLine, parseLine, type Fields } from "../src/core/logfmt/format.ts";
+import { resetState } from "../src/core/state.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { isActive } from "../src/store/model/predicates.ts";
+import type { WriteCandidate } from "../src/gate/gate.ts";
+import { findStaleOpen } from "../src/portable/decay.ts"
+import { exportMemories } from "../src/portable/export.ts"
+import { importMemories } from "../src/portable/import.ts";
+import { setRepoScope } from "../src/identity/repokey.ts";
+import { systemDigest } from "../src/inject/digest.ts";
 import { loadPlugin } from "./harness.ts";
 
 let root: string;

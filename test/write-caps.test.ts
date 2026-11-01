@@ -8,11 +8,14 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runWriteGate } from "../src/gates.ts";
-import { dateStr, evidenceDir, exportsDir, memoryRoot } from "../src/config.ts";
-import { formatLine } from "../src/logfmt.ts";
-import { appendMemory, loadAll, MAX_CONTENT_CHARS } from "../src/memory.ts";
-import { extractCallForms, extractPathRefs } from "../src/resolver.ts";
+import { runWriteGate } from "../src/gate/gate.ts";
+import { evidenceDir, exportsDir, memoryRoot } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { formatLine } from "../src/core/logfmt/format.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { MAX_CONTENT_CHARS } from "../src/store/model/memory.ts";
+import { extractCallForms, extractPathRefs } from "../src/gate/resolver.ts";
 import { loadPlugin } from "./harness.ts";
 
 let root: string;

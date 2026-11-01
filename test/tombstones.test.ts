@@ -30,27 +30,20 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { memoryRoot } from "../src/config.ts";
-import { contentHash } from "../src/evidence.ts";
-import { runWriteGate } from "../src/gates.ts";
-import { formatLine } from "../src/logfmt.ts";
-import { loadAll, prune } from "../src/memory.ts";
-import { resetSessionScopes, setRepoScope } from "../src/repokey.ts";
-import { redactSecrets, REDACTED_SECRET } from "../src/secrets.ts";
-import { resetState } from "../src/state.ts";
-import { numericTokens, polaritySigns } from "../src/tokenize.ts";
-import {
-  findRejection,
-  NEAR_FLOOR,
-  rejectedFile,
-  removeTombstone,
-  resetTombstoneCache,
-  sketchOf,
-  tombstone,
-  tombstones,
-} from "../src/tombstones.ts";
+import { memoryRoot } from "../src/core/config/paths.ts";
+import { contentHash } from "../src/evidence/record.ts";
+import { runWriteGate } from "../src/gate/gate.ts";
+import { formatLine } from "../src/core/logfmt/format.ts";
+import { loadAll } from "../src/store/files/load.ts"
+import { prune } from "../src/store/files/prune.ts";
+import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
+import { redactSecrets, REDACTED_SECRET } from "../src/store/secrets.ts";
+import { resetState } from "../src/core/state.ts";
+import { numericTokens, polaritySigns } from "../src/core/tokenize.ts";
+import { findRejection, rejectedFile } from "../src/store/tombstones/rejection.ts"
+import { NEAR_FLOOR, removeTombstone, resetTombstoneCache, sketchOf, tombstone, tombstones } from "../src/store/tombstones/tombstone.ts";
 import { blockMemory, unblockMemory } from "../src/viewer/mutate.ts";
-import { blockedEntries } from "../src/blocklist.ts";
+import { blockedEntries } from "../src/store/blocklist.ts";
 import { loadPlugin } from "./harness.ts";
 
 beforeEach(() => {

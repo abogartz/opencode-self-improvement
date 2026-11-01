@@ -13,15 +13,17 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { dateStr, evidenceDir, memoryRoot, snapshotDir } from "../src/config.ts";
-import { formatLine, parseLine, type Fields } from "../src/logfmt.ts";
-import { loadAll } from "../src/memory.ts";
-import { runWriteGate, type GateContext } from "../src/gates.ts";
-import { pruneMemory } from "../src/prune.ts";
-import { contextualPull, systemDigest } from "../src/inject.ts";
-import { afterTool, evidenceCalls, hasGateCheck } from "../src/triggers.ts";
-import { resetState, setCurrent } from "../src/state.ts";
-import { rememberSessionDir } from "../src/repokey.ts";
+import { evidenceDir, memoryRoot, snapshotDir } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { formatLine, parseLine, type Fields } from "../src/core/logfmt/format.ts";
+import { loadAll } from "../src/store/files/load.ts";
+import { runWriteGate, type GateContext } from "../src/gate/gate.ts";
+import { pruneMemory } from "../src/store/prune.ts";
+import { systemDigest } from "../src/inject/digest.ts"
+import { contextualPull } from "../src/inject/pull.ts";
+import { afterTool, evidenceCalls, hasGateCheck } from "../src/capture/triggers.ts";
+import { resetState, setCurrent } from "../src/core/state.ts";
+import { rememberSessionDir } from "../src/identity/repokey.ts";
 
 let root: string;
 let liveRoot: string;

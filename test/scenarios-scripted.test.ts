@@ -11,15 +11,12 @@
 // pin functional composition, so expectations are current behavior, and a
 // deliberate expectation change is the review signal when semantics change.
 import { afterEach, describe, expect, test } from "bun:test";
-import { runWriteGate, type GateContext } from "../src/gates.ts";
+import { runWriteGate, type GateContext } from "../src/gate/gate.ts";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { memoryRoot } from "../src/config.ts";
-import {
-	EXPORT_HEADER,
-	EXPORT_VERSION,
-	importMemories,
-} from "../src/portable.ts";
+import { memoryRoot } from "../src/core/config/paths.ts";
+import { EXPORT_HEADER, EXPORT_VERSION } from "../src/portable/export.ts"
+import { importMemories } from "../src/portable/import.ts";
 import { startScripted, type Scripted } from "./helpers/scripted.ts";
 
 let s: Scripted;

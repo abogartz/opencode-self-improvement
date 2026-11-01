@@ -6,8 +6,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendLog } from "../src/logfmt.ts";
-import { lockFileFor, withStoreLock } from "../src/lock.ts";
+import { appendLog } from "../src/core/logfmt/publish.ts";
+import { lockFileFor, withStoreLock } from "../src/store/lock.ts";
 
 const roots: string[] = [];
 function tmp(): string {

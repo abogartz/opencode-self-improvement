@@ -11,11 +11,12 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dateStr, evidenceDir } from "../src/config.ts";
-import { record } from "../src/evidence.ts";
-import { appendMemory } from "../src/memory.ts";
-import { resetState } from "../src/state.ts";
-import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/repokey.ts";
+import { evidenceDir } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { record } from "../src/evidence/record.ts";
+import { appendMemory } from "../src/store/files/append.ts";
+import { resetState } from "../src/core/state.ts";
+import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/identity/repokey.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
 
 let root: string;

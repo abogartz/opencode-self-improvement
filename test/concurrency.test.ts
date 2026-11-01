@@ -8,27 +8,37 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { memoryRoot } from "../src/config.ts";
-import { appendMemory, loadAll, markSuperseded, prune, snapshotFiles } from "../src/memory.ts";
-import { parseLine, readLines } from "../src/logfmt.ts";
-import { restoreSnapshot } from "../src/undo.ts";
+import { memoryRoot } from "../src/core/config/paths.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { prune } from "../src/store/files/prune.ts"
+import { snapshotFiles } from "../src/store/files/snapshots.ts"
+import { markSuperseded } from "../src/store/files/supersede.ts";
+import { parseLine } from "../src/core/logfmt/format.ts"
+import { readLines } from "../src/core/logfmt/read.ts";
+import { restoreSnapshot } from "../src/store/undo.ts";
 
 const DAY = new Date().toISOString().slice(0, 10);
 const store = () => join(memoryRoot(), `${DAY}.logfmt`);
 let root: string;
 
+// A starved Windows worker can spend >5s inside one fs burst (green runs
+// measured supersede racing at 5.5s, lifecycle hooks past 8s), and Bun
+// applies the default 5s to hooks even where the test carries a longer
+// override. 30s budgets for every test and hook here; no assertion changes
+// (#245).
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "osi-race-"));
   process.env.OPENCODE_MEMORY_DIR = join(root, "memory");
   process.env.OPENCODE_COMMANDS_DIR = join(root, "commands");
   mkdirSync(memoryRoot(), { recursive: true });
-});
+}, 30_000);
 
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
   rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-});
+}, 30_000);
 
 async function rawLines(): Promise<string[]> {
   return readLines(store());
@@ -65,7 +75,7 @@ describe("supersede racing appends", () => {
     const rows = await loadAll();
     expect(rows.filter((m) => m.superseded_by)).toHaveLength(40);
     expect(rows).toHaveLength(80);
-  });
+  }, 30_000);
 
   // 300 serialized rewrites race 400 reads. Four Windows test workers can
   // take longer than Bun's default 5s; let the workload finish before teardown
@@ -119,7 +129,7 @@ describe("prune racing appends", () => {
     const lines = await rawLines();
     expect(lines).toHaveLength(30);
     for (const ts of newTs) expect(lines.some((l) => l.includes(`ts=${ts}`))).toBe(true);
-  });
+  }, 30_000);
 });
 
 describe("restore racing appends", () => {
@@ -139,7 +149,7 @@ describe("restore racing appends", () => {
     expect(res[0].restored).toBe(true);
     const lines = await rawLines();
     for (const ts of appended) expect(lines.some((l) => l.includes(`ts=${ts}`))).toBe(true);
-  });
+  }, 30_000);
 
   test("a force restore under contention leaves no row in neither place", async () => {
     // Force drops rows by design. The contract is that none of them vanishes:
@@ -160,7 +170,7 @@ describe("restore racing appends", () => {
       (ts) => !inStore.has(ts) && !safety.includes(ts) && !original.includes(ts),
     );
     expect(lost).toEqual([]);
-  });
+  }, 30_000);
 });
 
 describe("two processes sharing one store", () => {
@@ -190,7 +200,7 @@ describe("two processes sharing one store", () => {
     expect(new Set(tsValues).size).toBe(120); // no timestamp collisions across processes
     expect(lines.filter((l) => l.includes("superseded_by=stress"))).toHaveLength(20);
     expect(readdirSync(memoryRoot()).filter((f) => f.endsWith(".lock"))).toEqual([]);
-  });
+  }, 30_000);
 
   test("a reader process always parses a complete file", async () => {
     await seed(200);
@@ -220,5 +230,5 @@ describe("two processes sharing one store", () => {
     for (const rows of byWriter.values()) {
       expect([...rows].sort((a, b) => a - b)).toEqual(Array.from({ length: 50 }, (_, i) => i));
     }
-  });
+  }, 30_000);
 });

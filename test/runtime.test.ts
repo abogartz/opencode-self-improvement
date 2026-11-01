@@ -4,7 +4,7 @@
 // No fs, no Bun global here — the version string is injected, so the exact
 // same suite passes on every bun binary that runs `bun test`.
 import { describe, expect, test } from "bun:test";
-import { MIN_BUN, bunFloorWarning, parseBunVersion } from "../src/runtime.ts";
+import { MIN_BUN, bunFloorWarning, parseBunVersion } from "../src/core/runtime.ts";
 
 // Unwraps a warning we EXPECT to exist; a null result becomes a string that
 // fails the toContain checks below, so this never hides a bug (and avoids

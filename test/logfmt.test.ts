@@ -6,9 +6,13 @@ import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writ
 import { appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { memoryRoot } from "../src/config.ts";
-import { appendLog, fileIdentity, formatLine, parseLine, readLines, writeAtomic } from "../src/logfmt.ts";
-import { appendMemory, loadAll, markSuperseded } from "../src/memory.ts";
+import { memoryRoot } from "../src/core/config/paths.ts";
+import { formatLine, parseLine } from "../src/core/logfmt/format.ts"
+import { appendLog, fileIdentity, writeAtomic } from "../src/core/logfmt/publish.ts"
+import { readLines } from "../src/core/logfmt/read.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { markSuperseded } from "../src/store/files/supersede.ts";
 
 let tmpDir: string;
 

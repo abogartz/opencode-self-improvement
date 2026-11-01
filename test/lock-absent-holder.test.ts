@@ -42,7 +42,7 @@ mock.module("node:fs/promises", () => ({
   },
 }));
 
-const { holdFileLock, lockFileFor } = await import("../src/lock.ts");
+const { holdFileLock, lockFileFor } = await import( "../src/store/lock.ts");
 
 const BUDGET = 1000;
 

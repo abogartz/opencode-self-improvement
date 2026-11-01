@@ -60,6 +60,7 @@ describe("Feature: durable memory store over the terminal", () => {
     expect(canonicalLines(g.memoryDir)).toEqual([]);
   });
 
+  // @covers hook:session.context hook:session.prompt hook:event.subscribe
   test("Scenario: remember stores a fact and a new session sees it", async () => {
     // Given a fresh instance where the agent stores one frontier fact
     const g = guest();

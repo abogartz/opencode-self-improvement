@@ -18,12 +18,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dateStr, evidenceDir, memoryRoot } from "../src/config.ts";
-import { runWriteGate } from "../src/gates.ts";
-import { parseLine, type Fields } from "../src/logfmt.ts";
+import { evidenceDir, memoryRoot } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { runWriteGate } from "../src/gate/gate.ts";
+import { parseLine, type Fields } from "../src/core/logfmt/format.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
-import { rememberSessionDir, repoScopeFor, resetSessionScopes, setRepoScope } from "../src/repokey.ts";
-import { resetState, setCurrent } from "../src/state.ts";
+import { rememberSessionDir, repoScopeFor, resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
+import { resetState, setCurrent } from "../src/core/state.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
 
 let root: string;

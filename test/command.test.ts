@@ -5,8 +5,8 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin } from "./harness.ts";
-import { resetState } from "../src/state.ts";
-import { ensureCommand } from "../src/command.ts";
+import { resetState } from "../src/core/state.ts";
+import { ensureCommand } from "../src/command/ensure.ts";
 
 let commandsDirPath: string;
 let root: string;

@@ -2,10 +2,12 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { dateStr, evidenceDir } from "../src/config.ts";
-import { parseLine, readLines } from "../src/logfmt.ts";
-import { resetState, session, setCurrent } from "../src/state.ts";
-import { afterTool, callsFor, writeEvidence } from "../src/triggers.ts";
+import { evidenceDir } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { parseLine } from "../src/core/logfmt/format.ts"
+import { readLines } from "../src/core/logfmt/read.ts";
+import { resetState, session, setCurrent } from "../src/core/state.ts";
+import { afterTool, callsFor, writeEvidence } from "../src/capture/triggers.ts";
 
 let root: string;
 let old: string | undefined;
