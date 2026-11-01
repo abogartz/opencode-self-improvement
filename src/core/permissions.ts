@@ -16,7 +16,18 @@ export function tightenDirectory(path: string): void {
   try {
     const mode = fstatSync(fd).mode & 0o7777;
     const privateMode = mode & 0o700;
-    if (mode !== privateMode) fchmodSync(fd, privateMode);
+    if (mode !== privateMode) {
+      try {
+        fchmodSync(fd, privateMode);
+      } catch (err) {
+        // A readable store may be immutable, foreign-owned, or on a mount
+        // without chmod support. Keep reads available without claiming that
+        // its existing permissions were tightened. Open-time refusals above
+        // remain policy errors; unexpected I/O failures still propagate.
+        const code = (err as NodeJS.ErrnoException).code;
+        if (!code || !["EPERM", "EROFS", "EOPNOTSUPP", "ENOSYS"].includes(code)) throw err;
+      }
+    }
   } finally {
     closeSync(fd);
   }

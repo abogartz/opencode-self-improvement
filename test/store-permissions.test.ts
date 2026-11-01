@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
+import { loadAll } from "../src/store/files/load.ts";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +10,7 @@ import { snapshotFiles } from "../src/store/files/snapshots.ts";
 import { withStoreLock, lockFileFor, LOCK_WRITE } from "../src/store/lock.ts";
 import { preparePrivateFile } from "../src/core/permissions.ts";
 import { readStatus, writeStatus, statusFile, sessionStatusFile } from "../src/status/write.ts";
-import { type StatusPayload } from "../src/status/payload.ts";
+import type { StatusPayload } from "../src/status/payload.ts";
 
 // Windows chmod does not represent ACL privacy. Exercise these guarantees on
 // POSIX with a permissive umask, rather than passing vacuous Windows checks.
@@ -111,6 +113,26 @@ describe.skipIf(process.platform === "win32")("private store modes", () => {
       await ensureDir(root);
       expect(mode(root)).toBe(0o500);
     } finally { chmodSync(root, 0o700); }
+  });
+
+  test.each(["EPERM", "EROFS", "EOPNOTSUPP", "ENOSYS"])("a readable root remains usable when directory chmod reports %s", async (code) => {
+    mkdirSync(root, { mode: 0o755 });
+    writeFileSync(join(root, "2026-01-01.logfmt"), 'ts=2026-01-01T00:00:00.000Z type=learning scope=build content="existing memory"\n');
+    const spy = spyOn(fs, "fchmodSync").mockImplementation(() => { throw Object.assign(new Error(code), { code }); });
+    try {
+      expect(memoryRoot()).toBe(root);
+      await ensureDir(root);
+      expect((await loadAll()).map((row) => row.content)).toEqual(["existing memory"]);
+      expect(spy).toHaveBeenCalled();
+      expect(mode(root)).toBe(0o755); // The fallback cannot promise a private traversal barrier.
+    } finally { spy.mockRestore(); }
+  });
+
+  test("unexpected directory chmod failures still propagate", () => {
+    mkdirSync(root, { mode: 0o755 });
+    const spy = spyOn(fs, "fchmodSync").mockImplementation(() => { throw Object.assign(new Error("disk failure"), { code: "EIO" }); });
+    try { expect(() => memoryRoot()).toThrow("disk failure"); }
+    finally { spy.mockRestore(); }
   });
 
   test("the status writer publishes both private files and tightens existing ones before writing", async () => {

@@ -92,19 +92,23 @@ export async function readStatus(sessionID?: string): Promise<StatusPayload | nu
 // Newest-first last `limit` write_blocked evidence rows, scanning today and
 // yesterday so a block just before midnight stays visible.
 export async function blockedRecent(limit = 6): Promise<BlockedRow[]> {
-  const today = dateStr();
-  const yesterday = new Date(Date.now() - 86_400_000).toISOString().split("T")[0]!;
-  const rows: BlockedRow[] = [];
-  for (const day of [yesterday, today]) {
-    for (const line of await readLines(join(evidenceDir(), `${day}.logfmt`))) {
-      const f = parseLine(line);
-      if (!f || f.ev !== "write_blocked") continue;
-      rows.push({
-        ts: String(f.ts ?? day),
-        sid: String(f.sid ?? "?"),
-        reason: String(f.reason ?? "?"),
-      });
+  try {
+    const today = dateStr();
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().split("T")[0]!;
+    const rows: BlockedRow[] = [];
+    for (const day of [yesterday, today]) {
+      for (const line of await readLines(join(evidenceDir(), `${day}.logfmt`))) {
+        const f = parseLine(line);
+        if (!f || f.ev !== "write_blocked") continue;
+        rows.push({
+          ts: String(f.ts ?? day),
+          sid: String(f.sid ?? "?"),
+          reason: String(f.reason ?? "?"),
+        });
+      }
     }
+    return rows.slice(-limit).reverse();
+  } catch {
+    return []; // A refused root is no status data, not an unhandled panel refresh.
   }
-  return rows.slice(-limit).reverse();
 }
