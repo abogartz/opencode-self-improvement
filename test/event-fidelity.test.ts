@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { SessionEvent } from "@opencode/schema/session-event";
 import { Schema } from "effect";
 import { CAPTURE_EVENT_TYPES } from "../src/index.ts";
-import { IDENTITY_EVENT_TYPES } from "../src/host.ts";
+import { IDENTITY_EVENT_TYPES } from "../src/identity/host-events.ts";
 import moveRecording from "./fixtures/host-session-move.json";
 
 const MANIFEST = join(import.meta.dir, "../node_modules/@opencode/schema/dist/event-manifest.d.ts");

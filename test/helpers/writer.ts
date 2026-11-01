@@ -2,7 +2,8 @@
 // for another opencode session (or the viewer) sharing one memory root. Runs
 // appends and whole-file rewrites concurrently, exactly as two live sessions
 // would, and reports what it believes it wrote.
-import { appendMemory, markSuperseded } from "../../src/memory.ts";
+import { appendMemory } from "../../src/store/files/append.ts"
+import { markSuperseded } from "../../src/store/files/supersede.ts";
 import { requireTempPath } from "./temp-root.ts";
 
 const [dir, countRaw, supersededRaw] = process.argv.slice(2);

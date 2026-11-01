@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, openSync, closeSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { memoryRoot } from "../src/config.ts";
+import { memoryRoot } from "../src/core/config/paths.ts";
 import {
   HITS_FILENAME,
   THROTTLE_MS,
@@ -20,11 +20,14 @@ import {
   resetLedgerCache,
   useSignals,
   usedRecently,
-} from "../src/hits.ts";
-import { appendMemory, loadAll } from "../src/memory.ts";
-import { scoreMemories, sharedTerms, words } from "../src/inject.ts";
-import { ledgerIsYoung, renderMemoryReport } from "../src/status.ts";
-import type { Memory } from "../src/memory.ts";
+} from "../src/hits/ledger.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts";
+import { scoreMemories, words } from "../src/recall/score.ts"
+import { sharedTerms } from "../src/recall/shared-terms.ts";
+import { ledgerIsYoung } from "../src/status/metrics.ts"
+import { renderMemoryReport } from "../src/status/report.ts";
+import type { Memory } from "../src/store/model/memory.ts";
 
 let root: string;
 

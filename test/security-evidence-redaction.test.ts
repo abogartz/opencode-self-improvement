@@ -12,13 +12,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
-import { appendMemory } from "../src/memory.ts";
-import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/repokey.ts";
-import { resetState, setCurrent } from "../src/state.ts";
-import { dateStr, deletionsFile, evidenceDir } from "../src/config.ts";
-import { redactSecrets } from "../src/secrets.ts";
+import { appendMemory } from "../src/store/files/append.ts";
+import { rememberSessionDir, resetSessionScopes, resolveRepo, setRepoScope } from "../src/identity/repokey.ts";
+import { resetState, setCurrent } from "../src/core/state.ts";
+import { deletionsFile, evidenceDir } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { redactSecrets } from "../src/store/secrets.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
-import { pruneMemory } from "../src/prune.ts";
+import { pruneMemory } from "../src/store/prune.ts";
 
 const TOKEN = "ghp_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 const PEM = [

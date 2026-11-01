@@ -26,21 +26,21 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
-import { memoryRoot } from "../src/config.ts";
-import { formatLine } from "../src/logfmt.ts";
-import { addBlock } from "../src/blocklist.ts";
-import { appendMemory, isActive, loadAll, prune } from "../src/memory.ts";
-import { setRepoScope } from "../src/repokey.ts";
-import { resetState } from "../src/state.ts";
-import {
-  compactionAnchor,
-  contextualPull,
-  relevantKnowledge,
-  scoreMemories,
-  selectRelevant,
-  systemDigest,
-} from "../src/inject.ts";
-import { runWriteGate } from "../src/gates.ts";
+import { memoryRoot } from "../src/core/config/paths.ts";
+import { formatLine } from "../src/core/logfmt/format.ts";
+import { addBlock } from "../src/store/blocklist.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { prune } from "../src/store/files/prune.ts"
+import { isActive } from "../src/store/model/predicates.ts";
+import { setRepoScope } from "../src/identity/repokey.ts";
+import { resetState } from "../src/core/state.ts";
+import { compactionAnchor } from "../src/inject/anchor.ts"
+import { systemDigest } from "../src/inject/digest.ts"
+import { contextualPull } from "../src/inject/pull.ts"
+import { relevantKnowledge, selectRelevant } from "../src/recall/relevant.ts"
+import { scoreMemories } from "../src/recall/score.ts";
+import { runWriteGate } from "../src/gate/gate.ts";
 import { MEMORIES, QUERIES } from "../bench/recall-dataset.ts";
 import {
   CONTROL_ARMS,
@@ -206,7 +206,7 @@ describe("forbidden hits — a retired memory never reaches a model", () => {
     const ts = seedRow(0, MEMORIES[0]!, { status: "open" });
     const file = join(memoryRoot(), `${ts.split("T")[0]}.logfmt`);
     // Retire it in place, exactly as memory_update / decay do.
-    const { markSuperseded } = await import("../src/memory.ts");
+    const { markSuperseded } = await import("../src/store/files/supersede.ts");
     expect(await markSuperseded(ts, { superseded_by: isoFor(1), reason: "update" })).toBe(true);
 
     const system: string[] = [];
@@ -491,14 +491,15 @@ describe("governed-path tripwire — no write path walks past the gate", () => {
   // must route through runWriteGate; a new entry here is a design decision, not
   // an accident, so the review sees it.
   const APPEND_ALLOWLIST: Record<string, string> = {
-    "src/memory.ts": "defines appendMemory, the store's single write choke point",
-    "src/gates.ts": "GATE-4 promotion — the governed door itself",
+    "src/store/files/append.ts": "defines appendMemory, the store's single write choke point",
+    "src/gate/gate.ts": "GATE-4 promotion — the governed door itself",
     "src/viewer/mutate.ts": "human-approved edit: reason required, snapshot first, old row superseded",
     "src/viewer/server.ts": "restore-entry: re-adds one audited row from the deletions log",
   };
 
   // One call-site count per file, ignoring the identifier inside import lists
-  // (`import { appendMemory, … } from "../memory.ts"` is not a write).
+  // (`import { appendMemory, … } from "../memory.ts"` is not a write) and
+  // comments — prose about the primitive is not a call either.
   function appendCalls(text: string): number {
     let count = 0;
     let inImport = false;
@@ -511,6 +512,7 @@ describe("governed-path tripwire — no write path walks past the gate", () => {
         }
         continue;
       }
+      if (/^\/\//.test(t) || /^\*/.test(t)) continue;
       if (/\bappendMemory\s*\(/.test(t)) count++;
     }
     return count;
@@ -537,14 +539,21 @@ describe("governed-path tripwire — no write path walks past the gate", () => {
   test("the model-facing write paths still call runWriteGate", () => {
     const gatesIn = (rel: string) =>
       (readFileSync(join(REPO, rel), "utf8").match(/runWriteGate\s*\(/g) ?? []).length;
-    // memory_remember, memory_update, memory_import, auto-capture.
-    expect(gatesIn("src/index.ts")).toBeGreaterThanOrEqual(4);
+    // memory_remember, memory_update, memory_import live in their own modules
+    // since the #168 split; auto-capture stayed in index.ts. Each write path
+    // is asserted individually — the tripwire must keep naming them, not just
+    // a file that happens to contain them.
+    expect(gatesIn("src/tools/remember.ts")).toBeGreaterThanOrEqual(1);
+    expect(gatesIn("src/tools/update.ts")).toBeGreaterThanOrEqual(1);
+    expect(gatesIn("src/tools/import.ts")).toBeGreaterThanOrEqual(1);
+    expect(gatesIn("src/index.ts")).toBeGreaterThanOrEqual(1);
     // /repo-init derived memories.
-    expect(gatesIn("src/init.ts")).toBeGreaterThanOrEqual(1);
+    expect(gatesIn("src/init/run.ts")).toBeGreaterThanOrEqual(1);
     // Import and capture are writers-by-proxy only: they hand candidates to the
-    // gate callback and never touch the store themselves.
-    expect(callSites().some(({ file }) => file === "src/portable.ts")).toBe(false);
-    expect(callSites().some(({ file }) => file === "src/capture.ts")).toBe(false);
+    // gate callback and never touch the store themselves. Whole folders are
+    // asserted — the #168 layout splits each domain across modules.
+    expect(callSites().some(({ file }) => file.startsWith("src/portable/"))).toBe(false);
+    expect(callSites().some(({ file }) => file.startsWith("src/capture/"))).toBe(false);
   });
 });
 

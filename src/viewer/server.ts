@@ -8,16 +8,18 @@ import { basename, join } from "node:path";
 import { isIP } from "node:net";
 import { serve, type Server } from "bun";
 import { z, type ZodTypeAny } from "zod";
-import { BlockBody, DeleteBody, EditBody, RestoreEntryBody, UnblockBody, UnrejectBody, ReleaseQuarantineBody } from "../schema.ts";
-import { deletionsFile, memoryRoot, snapshotDir } from "../config.ts";
-import { blockedEntries } from "../blocklist.ts";
-import { listSnapshots, restoreSnapshot } from "../undo.ts";
-import { appendMemory, loadAll, memoryFiles } from "../memory.ts";
-import { parseLine, readLines } from "../logfmt.ts";
+import { BlockBody, DeleteBody, EditBody, RestoreEntryBody, UnblockBody, UnrejectBody, ReleaseQuarantineBody } from "../tools/schema.ts";
+import { deletionsFile, memoryRoot, snapshotDir } from "../core/config/paths.ts";
+import { blockedEntries } from "../store/blocklist.ts";
+import { listSnapshots, restoreSnapshot } from "../store/undo.ts";
+import { appendMemory } from "../store/files/append.ts"
+import { loadAll, memoryFiles } from "../store/files/load.ts";
+import { parseLine } from "../core/logfmt/format.ts"
+import { readLines } from "../core/logfmt/read.ts";
 import { releaseQuarantinedMemory } from "./mutate.ts";
-import { isQuarantined, quarantineReasons } from "../quarantine.ts";
+import { isQuarantined, quarantineReasons } from "../store/quarantine/quarantine.ts";
 import { deleteMemory, editMemory, blockMemory, unblockMemory, unrejectMemory, type MutationResult } from "./mutate.ts";
-import { tombstones } from "../tombstones.ts";
+import { tombstones } from "../store/tombstones/tombstone.ts";
 
 const PAGE = join(import.meta.dir, "page.html");
 const HOST = process.env.OPENCODE_VIEWER_HOST || "127.0.0.1";

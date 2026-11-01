@@ -7,8 +7,8 @@ import {
   deriveMemoryRefs,
   extractCommandRefs,
   type CallLike,
-} from "../src/attribution.ts";
-import type { Memory } from "../src/memory.ts";
+} from "../src/inject/attribution.ts";
+import type { Memory } from "../src/store/model/memory.ts";
 
 const mem = (content: string): Memory => ({ content } as unknown as Memory);
 const call = (tool: string, arg: string, ts: string): CallLike => ({ tool, arg, ts });

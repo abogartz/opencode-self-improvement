@@ -18,12 +18,12 @@ import {
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { memoryRoot, snapshotDir } from "../src/config.ts";
-import { formatLine } from "../src/logfmt.ts";
-import { loadAll, memoryFiles } from "../src/memory.ts";
+import { memoryRoot, snapshotDir } from "../src/core/config/paths.ts";
+import { formatLine } from "../src/core/logfmt/format.ts";
+import { loadAll, memoryFiles } from "../src/store/files/load.ts";
 import { startViewer, type ViewerServer } from "../src/viewer/server.ts";
-import { blockedTs } from "../src/blocklist.ts";
-import { systemDigest } from "../src/inject.ts";
+import { blockedTs } from "../src/store/blocklist.ts";
+import { systemDigest } from "../src/inject/digest.ts";
 
 let root: string;
 let vm: ViewerServer;

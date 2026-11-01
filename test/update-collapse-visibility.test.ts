@@ -4,13 +4,17 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { runWriteGate } from "../src/gates.ts";
-import { exportMemories, importMemories } from "../src/portable.ts";
-import * as evidence from "../src/evidence.ts";
-import { appendMemory, isVisibleTo, loadAll, readerForSession, type Memory } from "../src/memory.ts";
-import { rememberSessionDir, resetSessionScopes, resolveRepo, sessionScope, setRepoScope } from "../src/repokey.ts";
-import { resetState, setCurrent } from "../src/state.ts";
-import { tombstone } from "../src/tombstones.ts";
+import { runWriteGate } from "../src/gate/gate.ts";
+import { exportMemories } from "../src/portable/export.ts"
+import { importMemories } from "../src/portable/import.ts";
+import * as evidence from "../src/evidence/record.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { type Memory } from "../src/store/model/memory.ts"
+import { isVisibleTo, readerForSession } from "../src/store/model/visibility.ts";
+import { rememberSessionDir, resetSessionScopes, resolveRepo, sessionScope, setRepoScope } from "../src/identity/repokey.ts";
+import { resetState, setCurrent } from "../src/core/state.ts";
+import { tombstone } from "../src/store/tombstones/tombstone.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
 
 const envKeys = ["OPENCODE_MEMORY_DIR", "OPENCODE_COMMANDS_DIR"] as const;

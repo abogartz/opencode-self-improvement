@@ -7,29 +7,17 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dateStr, evidenceDir, memoryRoot } from "../src/config.ts";
-import { formatLine } from "../src/logfmt.ts";
-import { appendMemory } from "../src/memory.ts";
-import {
-  attributionLines,
-  blockedRecent,
-  cacheHealth,
-  cacheRate,
-  contextLines,
-  estTok,
-  fmtCount,
-  readStatus,
-  renderMemoryReport,
-  sessionStatusFile,
-  statusDir,
-  statusFile,
-  windowLines,
-  writeStatus,
-  type StatusPayload,
-} from "../src/status.ts";
-import { setRepoScope } from "../src/repokey.ts";
+import { evidenceDir, memoryRoot } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { formatLine } from "../src/core/logfmt/format.ts";
+import { appendMemory } from "../src/store/files/append.ts";
+import { cacheHealth, cacheRate, estTok, fmtCount } from "../src/status/format.ts"
+import { type StatusPayload } from "../src/status/payload.ts"
+import { attributionLines, contextLines, renderMemoryReport, windowLines } from "../src/status/report.ts"
+import { blockedRecent, readStatus, sessionStatusFile, statusDir, statusFile, writeStatus } from "../src/status/write.ts";
+import { setRepoScope } from "../src/identity/repokey.ts";
 import { loadPlugin } from "./harness.ts";
-import { resetState } from "../src/state.ts";
+import { resetState } from "../src/core/state.ts";
 
 let root: string;
 

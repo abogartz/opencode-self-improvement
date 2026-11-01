@@ -33,12 +33,15 @@
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dateStr, evidenceDir } from "../src/config.ts";
-import { formatLine, parseLine } from "../src/logfmt.ts";
-import { isActive, loadAll, type Memory } from "../src/memory.ts";
-import { resetState } from "../src/state.ts";
-import { setRepoScope } from "../src/repokey.ts";
-import { scoreMemories, words } from "../src/inject.ts";
+import { evidenceDir } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { formatLine, parseLine } from "../src/core/logfmt/format.ts";
+import { loadAll } from "../src/store/files/load.ts"
+import { type Memory } from "../src/store/model/memory.ts"
+import { isActive } from "../src/store/model/predicates.ts";
+import { resetState } from "../src/core/state.ts";
+import { setRepoScope } from "../src/identity/repokey.ts";
+import { scoreMemories, words } from "../src/recall/score.ts";
 import { buildStore, lcg, MEMORIES, QUERIES } from "./recall-dataset.ts";
 import { loadPlugin } from "../test/harness.ts";
 

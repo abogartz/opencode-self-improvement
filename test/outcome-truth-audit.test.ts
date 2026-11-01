@@ -18,15 +18,18 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalFile, dateStr, evidenceDir } from "../src/config.ts";
-import * as evidence from "../src/evidence.ts";
-import { appendMemory, isActive, loadAll } from "../src/memory.ts";
+import { canonicalFile, evidenceDir } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import * as evidence from "../src/evidence/record.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { isActive } from "../src/store/model/predicates.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
-import { EXPORT_HEADER, EXPORT_VERSION } from "../src/portable.ts";
-import { resetSessionScopes, resolveRepo, setRepoScope } from "../src/repokey.ts";
-import { resetState } from "../src/state.ts";
+import { EXPORT_HEADER, EXPORT_VERSION } from "../src/portable/export.ts";
+import { resetSessionScopes, resolveRepo, setRepoScope } from "../src/identity/repokey.ts";
+import { resetState } from "../src/core/state.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
-import { formatLine, parseLine, type Fields } from "../src/logfmt.ts";
+import { formatLine, parseLine, type Fields } from "../src/core/logfmt/format.ts";
 
 let root: string;
 let a: string;

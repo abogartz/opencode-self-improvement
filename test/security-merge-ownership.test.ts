@@ -12,11 +12,17 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dateStr, evidenceDir } from "../src/config.ts";
-import { parseLine, readLines } from "../src/logfmt.ts";
-import { appendMemory, isActive, loadAll, markSuperseded, type Memory } from "../src/memory.ts";
-import { resetState } from "../src/state.ts";
-import { resetSessionScopes, resolveRepo, setRepoScope } from "../src/repokey.ts";
+import { evidenceDir } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { parseLine } from "../src/core/logfmt/format.ts"
+import { readLines } from "../src/core/logfmt/read.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts"
+import { markSuperseded } from "../src/store/files/supersede.ts"
+import { type Memory } from "../src/store/model/memory.ts"
+import { isActive } from "../src/store/model/predicates.ts";
+import { resetState } from "../src/core/state.ts";
+import { resetSessionScopes, resolveRepo, setRepoScope } from "../src/identity/repokey.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
 
 let root: string;

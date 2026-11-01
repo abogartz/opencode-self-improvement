@@ -13,13 +13,16 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dateStr, evidenceDir, memoryRoot } from "../src/config.ts";
-import { formatLine, parseLine, type Fields } from "../src/logfmt.ts";
-import { appendMemory, loadAll } from "../src/memory.ts";
-import { runWriteGate, type GateContext } from "../src/gates.ts";
-import { relevantKnowledge, systemDigest } from "../src/inject.ts";
-import { resetSessionScopes, setRepoScope } from "../src/repokey.ts";
-import { resetState, setCurrent } from "../src/state.ts";
+import { evidenceDir, memoryRoot } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { formatLine, parseLine, type Fields } from "../src/core/logfmt/format.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll } from "../src/store/files/load.ts";
+import { runWriteGate, type GateContext } from "../src/gate/gate.ts";
+import { systemDigest } from "../src/inject/digest.ts"
+import { relevantKnowledge } from "../src/recall/relevant.ts";
+import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
+import { resetState, setCurrent } from "../src/core/state.ts";
 
 let root: string;
 let liveRoot: string;

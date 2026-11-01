@@ -1,8 +1,8 @@
 // Second process for the lock contract tests: takes the store lock the same way
 // the plugin does, then appends one line, so a lock that another process
 // ignores shows up as an out-of-order line.
-import { appendLog } from "../../src/logfmt.ts";
-import { withStoreLock } from "../../src/lock.ts";
+import { appendLog } from "../../src/core/logfmt/publish.ts";
+import { withStoreLock } from "../../src/store/lock.ts";
 import { requireTempPath } from "./temp-root.ts";
 
 const file = process.argv[2];

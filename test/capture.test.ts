@@ -13,19 +13,18 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { dateStr, evidenceDir, memoryRoot } from "../src/config.ts";
-import { formatLine, parseLine, type Fields } from "../src/logfmt.ts";
-import { resetState } from "../src/state.ts";
+import { evidenceDir, memoryRoot } from "../src/core/config/paths.ts"
+import { dateStr } from "../src/core/time.ts";
+import { formatLine, parseLine, type Fields } from "../src/core/logfmt/format.ts";
+import { resetState } from "../src/core/state.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
-import { isActive, loadAll } from "../src/memory.ts";
-import { setRepoScope } from "../src/repokey.ts";
+import { loadAll } from "../src/store/files/load.ts"
+import { isActive } from "../src/store/model/predicates.ts";
+import { setRepoScope } from "../src/identity/repokey.ts";
 import { loadPlugin } from "./harness.ts";
-import {
-  buildCapturePrompt,
-  flattenTranscript,
-  parseCandidates,
-  parseModelRef,
-} from "../src/capture.ts";
+import { parseCandidates, parseModelRef } from "../src/capture/candidates.ts"
+import { buildCapturePrompt } from "../src/capture/prompt.ts"
+import { flattenTranscript } from "../src/capture/transcript.ts";
 
 let root: string;
 let liveRoot: string;

@@ -1,11 +1,11 @@
 {
   "name": "opencode-self-improvement",
-  "version": "0.15.3",
+  "version": "0.15.5",
   "description": "Durable memory for opencode: remember facts, decisions, and commands across sessions, plus a one-command per-repo setup (/repo-init).",
   "main": "index.ts",
   "exports": {
     ".": "./index.ts",
-    "./tui": "./src/tui.tsx"
+    "./tui": "./src/tui/panel.tsx"
   },
   "module": "index.ts",
   "type": "module",

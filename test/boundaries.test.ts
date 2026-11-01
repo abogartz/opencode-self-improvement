@@ -11,9 +11,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setRepoScope } from "../src/repokey.ts";
-import { appendLog, formatLine } from "../src/logfmt.ts";
-import { appendMemory, loadAll, malformedCount } from "../src/memory.ts";
+import { setRepoScope } from "../src/identity/repokey.ts";
+import { formatLine } from "../src/core/logfmt/format.ts"
+import { appendLog } from "../src/core/logfmt/publish.ts";
+import { appendMemory } from "../src/store/files/append.ts"
+import { loadAll, malformedCount } from "../src/store/files/load.ts";
 import { loadPlugin } from "./harness.ts";
 import { startViewer, type ViewerServer } from "../src/viewer/server.ts";
 

@@ -4,11 +4,11 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { appendMemory } from "../src/memory.ts";
-import { resetSessionScopes, setRepoScope } from "../src/repokey.ts";
-import { SESSION_CAP } from "../src/sessions.ts";
-import { resetState } from "../src/state.ts";
-import { readStatus } from "../src/status.ts";
+import { appendMemory } from "../src/store/files/append.ts";
+import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
+import { SESSION_CAP } from "../src/core/lru.ts";
+import { resetState } from "../src/core/state.ts";
+import { readStatus } from "../src/status/write.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
 
 let root: string, repo: string, plugins: LoadedPlugin[];
