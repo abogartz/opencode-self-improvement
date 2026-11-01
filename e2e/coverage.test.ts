@@ -18,12 +18,23 @@ import { join } from "node:path";
 import { MEMORY_TOOLS } from "./support/harness.ts";
 
 const E2E_DIR = import.meta.dir;
-const INDEX_SRC = readFileSync(join(E2E_DIR, "..", "src", "index.ts"), "utf8");
+const SRC_ROOT = join(E2E_DIR, "..", "src");
 
-/** Tool names as registered in the plugin source. */
+/** Registration sources: the entry point plus the per-tool modules (#168). */
+function registrationSources(): string {
+  let text = readFileSync(join(SRC_ROOT, "index.ts"), "utf8");
+  for (const f of readdirSync(join(SRC_ROOT, "tools")))
+    if (f.endsWith(".ts") && f !== "deps.ts" && f !== "registry.ts")
+      text += readFileSync(join(SRC_ROOT, "tools", f), "utf8");
+  return text;
+}
+
+const REG_SRC = registrationSources();
+
+/** Tool names as registered by the plugin (index.ts + src/tools/*). */
 function registeredTools(): string[] {
   const out = new Set<string>();
-  for (const m of INDEX_SRC.matchAll(/name:\s*"(memory_[a-z_]+)"/g)) out.add(m[1]);
+  for (const m of REG_SRC.matchAll(/name:\s*"(memory_[a-z_]+)"/g)) out.add(m[1]);
   return [...out].sort();
 }
 
@@ -34,11 +45,11 @@ function registeredTools(): string[] {
  */
 function registeredHooks(): string[] {
   const out = new Set<string>();
-  for (const m of INDEX_SRC.matchAll(/ctx\.session\??\.hook\(\s*"([a-z.]+)"/g))
+  for (const m of REG_SRC.matchAll(/ctx\.session\??\.hook\(\s*"([a-z.]+)"/g))
     out.add(`session.${m[1]}`);
-  for (const m of INDEX_SRC.matchAll(/ctx\.tool\??\.hook\(\s*"([a-z.]+)"/g))
+  for (const m of REG_SRC.matchAll(/ctx\.tool\??\.hook\(\s*"([a-z.]+)"/g))
     out.add(`tool.${m[1]}`);
-  if (/ctx\.event\??\.subscribe/.test(INDEX_SRC)) out.add("event.subscribe");
+  if (/ctx\.event\??\.subscribe/.test(REG_SRC)) out.add("event.subscribe");
   return [...out].sort();
 }
 
@@ -56,7 +67,9 @@ function scenarioFiles(): ScenarioFile[] {
       const scenarios: { title: string; covers: string[] }[] = [];
       // Walk every test("…") and collect @covers tags from the comment block
       // that ends immediately above it.
-      const lines = source.split("\n");
+      // Split on CRLF too: a Windows checkout with core.autocrlf would
+      // otherwise leave a trailing \r on every line and break the tag scan.
+      const lines = source.split(/\r?\n/);
       const pending: string[] = [];
       for (const line of lines) {
         const tag = /@covers\s+(.+)$/.exec(line);

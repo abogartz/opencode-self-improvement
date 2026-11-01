@@ -537,8 +537,14 @@ describe("governed-path tripwire — no write path walks past the gate", () => {
   test("the model-facing write paths still call runWriteGate", () => {
     const gatesIn = (rel: string) =>
       (readFileSync(join(REPO, rel), "utf8").match(/runWriteGate\s*\(/g) ?? []).length;
-    // memory_remember, memory_update, memory_import, auto-capture.
-    expect(gatesIn("src/index.ts")).toBeGreaterThanOrEqual(4);
+    // memory_remember, memory_update, memory_import live in their own modules
+    // since the #168 split; auto-capture stayed in index.ts. Each write path
+    // is asserted individually — the tripwire must keep naming them, not just
+    // a file that happens to contain them.
+    expect(gatesIn("src/tools/remember.ts")).toBeGreaterThanOrEqual(1);
+    expect(gatesIn("src/tools/update.ts")).toBeGreaterThanOrEqual(1);
+    expect(gatesIn("src/tools/import.ts")).toBeGreaterThanOrEqual(1);
+    expect(gatesIn("src/index.ts")).toBeGreaterThanOrEqual(1);
     // /repo-init derived memories.
     expect(gatesIn("src/init.ts")).toBeGreaterThanOrEqual(1);
     // Import and capture are writers-by-proxy only: they hand candidates to the
