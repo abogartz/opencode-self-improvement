@@ -98,8 +98,8 @@ export const MUTANTS: Mutant[] = [
 	{
 		id: "lock-noexcl-mutex",
 		file: "src/lock.ts",
-		find: `const handle = await open(lockPath, "wx");`,
-		replace: `const handle = await open(lockPath, "w");`,
+		find: `const handle = await open(lockPath, "wx", 0o600);`,
+		replace: `const handle = await open(lockPath, "w", 0o600);`,
 		invariant: "lock file is created with O_EXCL: the mutex is cross-process",
 		class: "D2",
 		scenario: true, // consistency: two sessions rewriting one day file
@@ -152,7 +152,7 @@ export const MUTANTS: Mutant[] = [
 	{
 		id: "append-truncate-regression",
 		file: "src/logfmt.ts",
-		find: `await appendFile(file, next);`,
+		find: `await handle.appendFile(next);`,
 		replace: `await Bun.write(file, next);`,
 		invariant: "appends are one O_APPEND write, never a replacing write",
 		class: "D2",
@@ -235,8 +235,8 @@ export const MUTANTS: Mutant[] = [
 	{
 		id: "snapshot-overwrite",
 		file: "src/memory.ts",
-		find: `const handle = await open(snap, "wx");`,
-		replace: `const handle = await open(snap, "w");`,
+		find: `const handle = await open(snap, "wx", 0o600);`,
+		replace: `const handle = await open(snap, "w", 0o600);`,
 		invariant: "claimSnapshot bumps names with O_EXCL: a snapshot is never",
 		class: "D4", // overwritten, across processes and not just in one
 	},

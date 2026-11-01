@@ -111,7 +111,7 @@ async function resolveExportTarget(file: string | undefined): Promise<string> {
 // existing link long before this runs, so the only way to test O_NOFOLLOW
 // without racing is to call the writer directly.
 export async function writeExport(path: string, text: string, exclusive = false): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   // exclusive = a default destination WE chose: create it or fail, never
   // silently replace another export's file. An explicit caller-supplied
   // `file` keeps the historical O_TRUNC replace (backup workflows rewrite

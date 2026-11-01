@@ -16,6 +16,7 @@ import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { dateStr, evidenceDir, memoryRoot } from "./config.ts";
 import { parseLine, readLines } from "./logfmt.ts";
+import { preparePrivateFile } from "./permissions.ts";
 import type { Attribution } from "./attribution.ts";
 
 export interface StoreCounts {
@@ -228,6 +229,7 @@ async function pruneStatusDir(): Promise<void> {
 
 async function writeJson(path: string, p: StatusPayload): Promise<boolean> {
   try {
+    preparePrivateFile(path);
     await Bun.write(path, JSON.stringify(p, null, 2) + "\n");
     return true;
   } catch {
@@ -238,10 +240,14 @@ async function writeJson(path: string, p: StatusPayload): Promise<boolean> {
 // Best-effort by design: a status write must never break injection. Writes the
 // per-session file (primary) AND the global latest file (fallback).
 export async function writeStatus(p: StatusPayload): Promise<void> {
-  await writeJson(statusFile(), p);
-  if (typeof p.sessionID === "string" && p.sessionID) {
-    await writeJson(sessionStatusFile(p.sessionID), p);
-    await pruneStatusDir();
+  try {
+    await writeJson(statusFile(), p);
+    if (typeof p.sessionID === "string" && p.sessionID) {
+      await writeJson(sessionStatusFile(p.sessionID), p);
+      await pruneStatusDir();
+    }
+  } catch {
+    // Resolving an existing root can also fail its permission check.
   }
 }
 
@@ -263,8 +269,12 @@ async function readJson(path: string): Promise<StatusPayload | null> {
  * Without one: the global latest file.
  */
 export async function readStatus(sessionID?: string): Promise<StatusPayload | null> {
-  if (sessionID) return readJson(sessionStatusFile(sessionID));
-  return readJson(statusFile());
+  try {
+    if (sessionID) return await readJson(sessionStatusFile(sessionID));
+    return await readJson(statusFile());
+  } catch {
+    return null; // an inaccessible root is also "no data"
+  }
 }
 
 // Newest-first last `limit` write_blocked evidence rows, scanning today and

@@ -99,6 +99,8 @@ describe("status files", () => {
     process.env.OPENCODE_MEMORY_DIR = join(root, "a-file");
     writeFileSync(join(root, "a-file"), "blocked");
     await writeStatus(payload()); // must not throw
+    expect(await readStatus()).toBeNull();
+    expect(await readStatus("ses_x")).toBeNull();
   });
 
   test("LRU cap prunes the oldest per-session files", async () => {
