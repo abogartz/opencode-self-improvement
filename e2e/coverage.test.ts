@@ -67,7 +67,9 @@ function scenarioFiles(): ScenarioFile[] {
       const scenarios: { title: string; covers: string[] }[] = [];
       // Walk every test("…") and collect @covers tags from the comment block
       // that ends immediately above it.
-      const lines = source.split("\n");
+      // Split on CRLF too: a Windows checkout with core.autocrlf would
+      // otherwise leave a trailing \r on every line and break the tag scan.
+      const lines = source.split(/\r?\n/);
       const pending: string[] = [];
       for (const line of lines) {
         const tag = /@covers\s+(.+)$/.exec(line);
