@@ -17,6 +17,10 @@ let plugins: LoadedPlugin[];
 let saved: Record<string, string | undefined>;
 let undoSpy = () => {};
 const keys = ["OPENCODE_MEMORY_DIR", "OPENCODE_COMMANDS_DIR", "OPENCODE_CBM_BIN"];
+// The lifecycle hooks await plugin cleanup and the capture tests poll for
+// fire-and-forget evidence; on a busy Windows runner these pass the default
+// 5s budget with real work (green run: 8s on the capture test's hook).
+// 30s budgets across hooks and tests; assertions unchanged (#245).
 beforeEach(() => {
   saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   root = mkdtempSync(join(tmpdir(), "osi-lifecycle-evidence-"));
@@ -26,14 +30,14 @@ beforeEach(() => {
   process.env.OPENCODE_COMMANDS_DIR = join(root, "commands");
   process.env.OPENCODE_CBM_BIN = join(root, "missing-cbm");
   resetState(); resetSessionScopes(); resetCaptureCooldowns(); setRepoScope(null); plugins = [];
-});
+}, 30_000);
 afterEach(async () => {
   undoSpy(); undoSpy = () => {};
   for (const p of plugins) await p.cleanup();
   resetState(); resetSessionScopes(); resetCaptureCooldowns(); setRepoScope(null);
   for (const key of keys) { if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key]; }
   rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-});
+}, 30_000);
 async function plugin(dir: string, capture = false) {
   const p = await loadPlugin(dir, capture ? { autoCapture: true, captureModel: "fake/model" } : {});
   plugins.push(p); return p;
@@ -81,7 +85,7 @@ test.each(["resolved", "unresolved", "ambient"])("init lifecycle retains its %s 
     expect(await read(pa, "reader-a", "init_skip")).toContain("ev=init_skip");
     expect(await read(pb, "reader-b", "init_skip")).toBe("No evidence");
   }
-});
+}, 30_000);
 
 test.each(["promoted", "refused"])("capture %s and lag remain with the pre-model operation", async (verdict) => {
   const pa = await plugin(a, true), pb = await plugin(b);
@@ -109,7 +113,7 @@ test.each(["promoted", "refused"])("capture %s and lag remain with the pre-model
     expect(await read(pa, "reader-a", name)).toContain(`ev=${name}`);
     expect(await read(pb, "reader-b", name)).toBe("No evidence");
   }
-});
+}, 30_000);
 
 test("suppressed captured unresolved evidence keeps its privacy label and scrubs prose", async () => {
   const pa = await plugin(a), pb = await plugin(b);
@@ -122,4 +126,4 @@ test("suppressed captured unresolved evidence keeps its privacy label and scrubs
   expect(own).toContain("sid=unknown"); expect(own).not.toContain(secret);
   expect(own).not.toContain("call="); expect(own).not.toContain("repo=");
   expect(await read(pb, "reader-b", "private_lifecycle")).toBe("No evidence");
-});
+}, 30_000);

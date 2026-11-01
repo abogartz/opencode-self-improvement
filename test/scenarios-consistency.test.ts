@@ -142,6 +142,11 @@ process.env.OPENCODE_COMMANDS_DIR = dir + "/commands";
 
 /** A second session appending: it reports every ts it was handed, because
  *  "the tool said it stored it" is precisely the promise under test. */
+// Every scenario that spawns writer children carries an explicit 30s test
+// budget below: two child bun launches (AV-scan slow on Windows) plus
+// readiness polling put real work past Bun's default 5s timeout on a busy
+// Windows runner at --parallel=4 — green runs were measured at 5.3s here.
+// Only time is granted; no assertion moves (#174's precedent, #245).
 function spawnRacer(label: string, rows: number): Writer {
 	const report = join(root, `${label}.reported`);
 	const script = join(root, `${label}.ts`);
@@ -342,7 +347,7 @@ describe("two sessions rewriting one day file", () => {
 			`${lost.length} of ${appended.length} appended rows were overwritten by another session's rewrite: ${lost.slice(0, 5).join(", ")}`,
 		).toBe(0);
 		expect(appended.length).toBe(40);
-	});
+	}, 30_000);
 });
 
 describe("a prune sweep while another session is appending", () => {
@@ -407,7 +412,7 @@ describe("a prune sweep while another session is appending", () => {
 			`${lost.length} of ${reported} appended rows are in neither the store nor any snapshot: ${lost.slice(0, 5).join(", ")}`,
 		).toBe(0);
 		expect(reported).toBe(100);
-	});
+	}, 30_000);
 });
 
 describe("the viewer deleting and editing while another session writes", () => {
@@ -455,7 +460,7 @@ describe("the viewer deleting and editing while another session writes", () => {
 			`${lost.length} of ${reported} appended rows are in neither the store nor any snapshot: ${lost.slice(0, 5).join(", ")}`,
 		).toBe(0);
 		expect(reported).toBe(100);
-	});
+	}, 30_000);
 });
 
 describe("restore in check and merge mode while sessions write", () => {
@@ -487,7 +492,7 @@ describe("restore in check and merge mode while sessions write", () => {
 			`${lost.length} of ${reported} appended rows are in neither the store nor any snapshot: ${lost.slice(0, 5).join(", ")}`,
 		).toBe(0);
 		expect(reported).toBe(100);
-	});
+	}, 30_000);
 
 	test("merge brings the snapshot back without clobbering live appends", async () => {
 		const seeded = seedScopes(200, [["consistency", 6000]]).get("consistency")!;
@@ -523,7 +528,7 @@ describe("restore in check and merge mode while sessions write", () => {
 			`${lost.length} of ${appended.length} appended rows were clobbered by the merge publish: ${lost.slice(0, 5).join(", ")}`,
 		).toBe(0);
 		expect(appended.length).toBe(100);
-	});
+	}, 30_000);
 });
 
 describe("an import landing while another session writes", () => {
