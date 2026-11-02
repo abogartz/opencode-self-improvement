@@ -58,7 +58,7 @@ async function claimSnapshot(file: string): Promise<string> {
   for (;;) {
     const snap = join(snapshotDir(), `${stamp}-${basename(file)}`);
     try {
-      const handle = await open(snap, "wx");
+      const handle = await open(snap, "wx", 0o600);
       await handle.close();
       return snap;
     } catch (err) {

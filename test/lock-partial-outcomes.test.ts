@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import * as evidence from "../src/evidence/record.ts";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -23,6 +24,10 @@ const restoreBudget = LOCK_RESTORE.timeoutMs;
 const first = "2026-01-01T00:00:00.000Z";
 const second = "2026-01-02T00:00:00.000Z";
 const path = (ts: string) => join(memoryRoot(), `${ts.slice(0, 10)}.logfmt`);
+const record = evidence.record;
+const pendingEvidence = new Set<Promise<void>>();
+let evidenceErrors: unknown[];
+let restoreEvidence = () => {};
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "osi-partial-lock-"));
   process.env.OPENCODE_MEMORY_DIR = join(root, "memory");
@@ -32,13 +37,27 @@ beforeEach(() => {
   resetCaptureCooldowns();
   LOCK_WRITE.timeoutMs = 40; LOCK_RESTORE.timeoutMs = 40;
   plugins = [];
+  evidenceErrors = [];
+  // Lock telemetry is fire-and-forget. Keep the real writer and its errors,
+  // but own its lifetime so deleting this fixture cannot break the next test.
+  const spy = spyOn(evidence, "record").mockImplementation((...args: Parameters<typeof record>) => {
+    const write = record(...args);
+    const settled = write.then(() => {}, (error: unknown) => { evidenceErrors.push(error); });
+    pendingEvidence.add(settled);
+    void settled.then(() => pendingEvidence.delete(settled));
+    return write;
+  });
+  restoreEvidence = () => spy.mockRestore();
 });
 afterEach(async () => {
   for (const plugin of plugins) await plugin.cleanup();
+  while (pendingEvidence.size) await Promise.all(pendingEvidence);
+  restoreEvidence();
   LOCK_WRITE.timeoutMs = writeBudget; LOCK_RESTORE.timeoutMs = restoreBudget;
   resetState(); resetSessionScopes(); setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR; delete process.env.OPENCODE_COMMANDS_DIR;
   rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  expect(evidenceErrors).toEqual([]);
 });
 function seed(ts: string, content: string) {
   writeFileSync(path(ts), formatLine({ ts, type: "context", scope: "planning", content, status: "open", repo: "global" }) + "\n");

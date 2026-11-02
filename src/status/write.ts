@@ -64,10 +64,14 @@ async function pruneStatusDir(): Promise<void> {
 // Best-effort by design: a status write must never break injection. Writes the
 // per-session file (primary) AND the global latest file (fallback).
 export async function writeStatus(p: StatusPayload): Promise<void> {
-  await writeJson(statusFile(), p);
-  if (typeof p.sessionID === "string" && p.sessionID) {
-    await writeJson(sessionStatusFile(p.sessionID), p);
-    await pruneStatusDir();
+  try {
+    await writeJson(statusFile(), p);
+    if (typeof p.sessionID === "string" && p.sessionID) {
+      await writeJson(sessionStatusFile(p.sessionID), p);
+      await pruneStatusDir();
+    }
+  } catch {
+    // Resolving an existing root can also fail its permission check.
   }
 }
 
@@ -77,26 +81,34 @@ export async function writeStatus(p: StatusPayload): Promise<void> {
  * Without one: the global latest file.
  */
 export async function readStatus(sessionID?: string): Promise<StatusPayload | null> {
-  if (sessionID) return readJson(sessionStatusFile(sessionID));
-  return readJson(statusFile());
+  try {
+    if (sessionID) return await readJson(sessionStatusFile(sessionID));
+    return await readJson(statusFile());
+  } catch {
+    return null; // an inaccessible root is also "no data"
+  }
 }
 
 // Newest-first last `limit` write_blocked evidence rows, scanning today and
 // yesterday so a block just before midnight stays visible.
 export async function blockedRecent(limit = 6): Promise<BlockedRow[]> {
-  const today = dateStr();
-  const yesterday = new Date(Date.now() - 86_400_000).toISOString().split("T")[0]!;
-  const rows: BlockedRow[] = [];
-  for (const day of [yesterday, today]) {
-    for (const line of await readLines(join(evidenceDir(), `${day}.logfmt`))) {
-      const f = parseLine(line);
-      if (!f || f.ev !== "write_blocked") continue;
-      rows.push({
-        ts: String(f.ts ?? day),
-        sid: String(f.sid ?? "?"),
-        reason: String(f.reason ?? "?"),
-      });
+  try {
+    const today = dateStr();
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().split("T")[0]!;
+    const rows: BlockedRow[] = [];
+    for (const day of [yesterday, today]) {
+      for (const line of await readLines(join(evidenceDir(), `${day}.logfmt`))) {
+        const f = parseLine(line);
+        if (!f || f.ev !== "write_blocked") continue;
+        rows.push({
+          ts: String(f.ts ?? day),
+          sid: String(f.sid ?? "?"),
+          reason: String(f.reason ?? "?"),
+        });
+      }
     }
+    return rows.slice(-limit).reverse();
+  } catch {
+    return []; // A refused root is no status data, not an unhandled panel refresh.
   }
-  return rows.slice(-limit).reverse();
 }
