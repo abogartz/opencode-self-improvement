@@ -13,6 +13,7 @@
 //
 // Scope of v2: same-machine reads. Against a REMOTE server the terminal panel
 // sees no status files (it says so) — the RPC surface is the planned follow-up.
+import { preparePrivateFile } from "../core/permissions.ts";
 import { readFile } from "node:fs/promises";
 import type { Attribution } from "../inject/attribution.ts";
 import { captureLag, ledgerIsYoung, rowsPerDay } from "./metrics.ts";
@@ -123,6 +124,7 @@ export const SESSION_FILE_CAP = 32;
 
 export async function writeJson(path: string, p: StatusPayload): Promise<boolean> {
   try {
+    preparePrivateFile(path);
     await Bun.write(path, JSON.stringify(p, null, 2) + "\n");
     return true;
   } catch {

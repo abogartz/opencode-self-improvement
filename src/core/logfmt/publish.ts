@@ -2,18 +2,21 @@
 // Minimal logfmt reader/writer shared by the durable store and the evidence
 // log. Field order is preserved on write so chains are diffable.
 import { dirname } from "node:path";
-import { appendFile, mkdir, rename, stat, unlink } from "node:fs/promises";
+import { mkdir, open, rename, stat, unlink } from "node:fs/promises";
+import { constants } from "node:fs";
+import { tightenDirectory } from "../permissions.ts";
 import { IS_WINDOWS } from "./format.ts";
 
 export async function ensureDir(path: string): Promise<void> {
-  await mkdir(path, { recursive: true });
+  await mkdir(path, { recursive: true, mode: 0o700 });
+  tightenDirectory(path);
 }
 
 export async function appendLog(file: string, line: string): Promise<void> {
   await ensureDir(dirname(file));
   const next = line.endsWith("\n") ? line : line + "\n";
   // One O_APPEND write: read-modify-write loses rows under concurrent
-  // appenders (20 concurrent appends left 2 on disk). appendFile's "a" flag is
+  // appenders (20 concurrent appends left 2 on disk). The handle uses
   // O_APPEND|O_CREAT — atomic small writes on local POSIX filesystems,
   // covering interleaved async tasks in the service AND a second process
   // (the viewer) appending the same day file. Do NOT "simplify" back to
@@ -21,7 +24,13 @@ export async function appendLog(file: string, line: string): Promise<void> {
   // Appending is safe against other appenders only. Callers writing a file that
   // is ALSO rewritten whole (a daily memory file, the blocklist) hold the store
   // lock around this — see lock.ts.
-  await appendFile(file, next);
+  const handle = await open(file, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | (constants.O_NOFOLLOW ?? 0), 0o600);
+  try {
+    if (!IS_WINDOWS) await handle.chmod((await handle.stat()).mode & 0o600);
+    await handle.appendFile(next);
+  } finally {
+    await handle.close();
+  }
 }
 
 // A change-detection token for one file: any append, rewrite or replacement
@@ -57,11 +66,15 @@ export async function writeAtomic(file: string, content: string, since?: string)
   // name would let one call replace the bytes another call's anchored publish
   // is retrying. Keep separate temps even when the caller holds a lock.
   const tmp = `${file}.${process.pid}.${++tmpSeq}.tmp`;
+  let claimed = false;
   try {
+    const handle = await open(tmp, "wx", 0o600);
+    claimed = true;
+    await handle.close();
     await Bun.write(tmp, content);
     await handoverRename(tmp, file, since);
   } catch (err) {
-    await unlink(tmp).catch(() => undefined);
+    if (claimed) await unlink(tmp).catch(() => undefined);
     throw err;
   }
 }

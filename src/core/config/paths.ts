@@ -5,12 +5,16 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tightenDirectory } from "../permissions.ts";
 
 export function memoryRoot(): string {
-  return (
+  const root = (
     process.env.OPENCODE_MEMORY_DIR ||
     join(homedir(), ".config", "opencode", "memory")
   );
+  // Protect old stores even on read-only use; do not create an absent store.
+  tightenDirectory(root);
+  return root;
 }
 
 // Where the plugin mirrors its own slash command (/repo-init). Written once at

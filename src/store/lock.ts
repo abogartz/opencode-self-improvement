@@ -21,7 +21,8 @@
 // Readers take NO lock: publishers hand over the new file with a rename
 // (writeAtomic in logfmt.ts), so a reader always sees a complete store, never
 // the middle of a rewrite.
-import { mkdir, open, stat, unlink } from "node:fs/promises";
+import { open, stat, unlink } from "node:fs/promises";
+import { ensureDir } from "../core/logfmt/publish.ts";
 import { basename, dirname } from "node:path";
 import { record } from "../evidence/record.ts";
 
@@ -140,7 +141,7 @@ export async function holdFileLock<T>(
   budgetMs: number,
   now: () => number = Date.now,
 ): Promise<T> {
-  await mkdir(dirname(lockPath), { recursive: true });
+  await ensureDir(dirname(lockPath));
   const token = `${process.pid}-${Math.random().toString(36).slice(2)}`;
   const started = now();
   let backoff = MIN_BACKOFF_MS;
@@ -155,7 +156,7 @@ export async function holdFileLock<T>(
   let everSawHolder = false;
   for (;;) {
     try {
-      const handle = await open(lockPath, "wx");
+      const handle = await open(lockPath, "wx", 0o600);
       try {
         await handle.write(token);
       } finally {
