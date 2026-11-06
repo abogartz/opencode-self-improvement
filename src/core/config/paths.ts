@@ -62,12 +62,18 @@ export function deletionsFile(): string {
   return join(memoryRoot(), "deletions.logfmt");
 }
 
-// Optional live-graph binary. When present the resolver cross-checks the local
-// source scan against the codebase-memory-mcp file graph; when absent the local
-// scan alone is authoritative (install-from-scratch requirement).
+// Optional live-graph binary, used ONLY by init's opt-in indexing (#323).
+// No read or gate path consumes the graph: gate1 resolves code refs against
+// the live file tree, and gate evidence is identical with the index present
+// or absent (measured, #317). Indexing therefore defaults OFF; set
+// OPENCODE_MEMORY_GRAPH=1 to have runInit build it.
 // Discovery order: OPENCODE_CBM_BIN override, an already-installed global on
 // PATH (matches a running MCP session's build), then the pinned npm copy
 // (codebase-memory-mcp is an optionalDependency of this package).
+export function graphEnabled(): boolean {
+  return process.env.OPENCODE_MEMORY_GRAPH === "1";
+}
+
 export function cbmBin(): string | undefined {
   if (process.env.OPENCODE_CBM_BIN) return process.env.OPENCODE_CBM_BIN;
   if (Bun.which("codebase-memory-mcp")) return undefined;

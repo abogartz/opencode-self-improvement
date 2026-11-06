@@ -1,9 +1,17 @@
 // Init phase: memory_init tool behavior. Hermetic — the fixture dir is a plain
-// (non-git) temp tree and OPENCODE_CBM_BIN points at a nonexistent binary so
-// the graph step degrades to `unavailable` without spawning anything real.
+// (non-git) temp tree. Graph indexing is opt-in (#323): by default no graph
+// spawn occurs at all; with OPENCODE_MEMORY_GRAPH=1 the OPENCODE_CBM_BIN
+// fixture (a marker script that exits nonzero) proves the spawn path is
+// reached and degrades to `unavailable`.
 // Scope = directory basename ("repo"), matching the repo-name convention.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin } from "./harness.ts";
@@ -25,6 +33,9 @@ beforeEach(async () => {
   process.env.OPENCODE_MEMORY_DIR = memoryDir;
   process.env.OPENCODE_COMMANDS_DIR = join(root, "commands");
   process.env.OPENCODE_CBM_BIN = join(root, "no-such-cbm");
+  // Graph indexing is opt-in (#323); ensure the ambient env does not leak it
+  // into the default-off tests.
+  delete process.env.OPENCODE_MEMORY_GRAPH;
   fixture = join(root, "repo");
   mkdirSync(fixture, { recursive: true });
   writeFileSync(
@@ -41,6 +52,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   delete process.env.OPENCODE_CBM_BIN;
+  delete process.env.OPENCODE_MEMORY_GRAPH;
   rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
@@ -48,7 +60,7 @@ describe("memory_init", () => {
   test("writes script pattern memories + an init stamp", async () => {
     const out = await init.execute({});
     expect(out).toContain("Initialized repo");
-    expect(out).toContain("Graph: unavailable");
+    expect(out).toContain("Graph: disabled");
     expect(out).toContain("npm run test");
     expect(out).toContain("npm run lint");
 
@@ -63,6 +75,31 @@ describe("memory_init", () => {
     expect(stamps.length).toBe(1);
     expect(stamps[0].content).toContain("repo=repo");
     expect(stamps[0].content).toContain("head=-");
+  });
+
+  test("default: no graph spawn occurs (#323)", async () => {
+    const marker = join(root, "spawned.marker");
+    const fake = join(root, "fake-cbm");
+    writeFileSync(fake, `#!/bin/sh\necho x >> "${marker}"\nexit 3\n`, {
+      mode: 0o755,
+    });
+    process.env.OPENCODE_CBM_BIN = fake;
+    const out = await init.execute({});
+    expect(out).toContain("Graph: disabled");
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  test("opt-in: OPENCODE_MEMORY_GRAPH=1 reaches the graph binary (#323)", async () => {
+    const marker = join(root, "spawned.marker");
+    const fake = join(root, "fake-cbm");
+    writeFileSync(fake, `#!/bin/sh\necho x >> "${marker}"\nexit 3\n`, {
+      mode: 0o755,
+    });
+    process.env.OPENCODE_CBM_BIN = fake;
+    process.env.OPENCODE_MEMORY_GRAPH = "1";
+    const out = await init.execute({});
+    expect(out).toContain("Graph: unavailable");
+    expect(existsSync(marker)).toBe(true);
   });
 
   test("idempotent: second run is a no-op, no duplicate memories", async () => {

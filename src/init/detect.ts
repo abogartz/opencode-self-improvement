@@ -18,7 +18,10 @@ export interface ScriptRecord {
 }
 
 export interface GraphStatus {
-  action: "indexed" | "unavailable" | "index-failed";
+  // "disabled": graph indexing is opt-in (OPENCODE_MEMORY_GRAPH=1) and was
+  // not requested — the default. No spawn occurs and nothing is lost: no
+  // read or gate path consumes the index (see #323).
+  action: "disabled" | "indexed" | "unavailable" | "index-failed";
   name?: string;
   mode: string;
 }

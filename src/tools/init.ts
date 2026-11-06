@@ -19,7 +19,7 @@ export const register: ToolRegister = (editor, deps) => {
     validated(InitArgs, {
       name: "memory_init",
       description:
-        "Initialize repository memory and knowledge graph. Ensures the codebase-memory graph for this repo is indexed (one-shot `cli` spawn; no session MCP needed) and re-derives build/lint/test/typecheck command memories through the write gate, then stores an init stamp keyed on git HEAD. Idempotent: a no-op when the stamp matches HEAD, unless force=true (refresh after a refactor).",
+        "Initialize repository memory: re-derives build/lint/test/typecheck command memories through the write gate and stores an init stamp keyed on git HEAD. Idempotent: a no-op when the stamp matches HEAD, unless force=true (refresh after a refactor). Codebase-memory graph indexing is OPT-IN (set OPENCODE_MEMORY_GRAPH=1) and off by default: no read or gate path consumes the index, and the spawn cost 11-26s per init when it ran. Memory works without it.",
       options: direct,
       async execute(args, context): Promise<{ content: string }> {
         const { sid } = toolIds(context);

@@ -1,6 +1,7 @@
 // run — split from src/init.ts (#168 domain restructure). Declaration bodies are unchanged.
-// Repository init: ensure the codebase-memory graph exists for this repo and
-// re-derive build/test command memories through the write gate. Deterministic
+// Repository init: re-derive build/test command memories through the write
+// gate, and — only when opted in via OPENCODE_MEMORY_GRAPH=1 (#323) — ensure
+// the codebase-memory graph exists for this repo. Deterministic
 // (no model calls): the graph binary is spawned one-shot via `cli`, manifests
 // are parsed locally, and every write goes through the 4-gate pipeline with the
 // `trusted` flag (plugin-authored bookkeeping, not model claims). Degrades
@@ -18,6 +19,7 @@ import { runWriteGate, type GateContext } from "../gate/gate.ts";
 import { captureEvidenceContext, record } from "../evidence/record.ts";
 import { writeEvidence, hasGateCheck } from "../capture/triggers.ts";
 import { writeTarget } from "../identity/repokey.ts";
+import { graphEnabled } from "../core/config/paths.ts";
 import { getCurrent } from "../core/state.ts";
 import {
   type GraphStatus,
@@ -133,7 +135,11 @@ export async function runInit(args: InitArgs): Promise<InitSummary> {
       scope,
       root,
       head,
-      graph: { action: "indexed", mode },
+      // A skipped init reports what THIS build would do, not what the prior
+      // stamp's build did: on a disabled build nothing is indexed (#323).
+      graph: graphEnabled()
+        ? { action: "indexed", mode }
+        : { action: "disabled", mode },
       scripts: [],
       stampTs: prior.ts,
       skipped: true,
@@ -151,7 +157,13 @@ export async function runInit(args: InitArgs): Promise<InitSummary> {
     evidenceContext,
   );
 
-  const graph = await ensureGraph(root, mode, force);
+  // Graph indexing is opt-in (#323). Measured on the benchmark: 11.5-26s per
+  // init on the first-write critical path, it failed in 29 of 32 real inits,
+  // and no read or gate path consumes the index (gate evidence is identical
+  // with it present or absent). Skip the spawn unless explicitly requested.
+  const graph: GraphStatus = graphEnabled()
+    ? await ensureGraph(root, mode, force)
+    : { action: "disabled", mode };
   const scripts = await detectScripts(root);
 
   let written = 0;
