@@ -286,6 +286,20 @@ describe("buildCapturePrompt", () => {
     expect(p).toContain("never shown to a model");
   });
 
+  // #329: 7 of 14 captured rows restated the session's own brief as a durable
+  // preference, and one instruction arrived as three rows in three scopes. The
+  // rules below are the whole fix, so pin their presence — a silent drop here
+  // costs precision, which no downstream gate can recover.
+  test("skips request framing and collapses same-area overlap (#329)", () => {
+    const p = buildCapturePrompt("user: hello world", 3);
+    expect(p).toContain("Skip: the task as it was asked");
+    expect(p).toContain("expire with the session");
+    expect(p).toContain("a session that never saw this conversation");
+    expect(p).toContain(
+      "Never emit the same fact twice under different scope names",
+    );
+  });
+
   test("redacts common secrets without treating ordinary code identifiers as secrets", () => {
     // Fixtures are split so secret scanners (GitHub push protection) skip them.
     const secrets = [
