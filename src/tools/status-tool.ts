@@ -1,7 +1,7 @@
 // The memory_status tool, extracted from index.ts (#168).
 // Closure access arrives through ToolDeps.
 import type { ToolRegister } from "./deps.ts";
-import { readLedger } from "../hits/ledger.ts";
+import { readLedger, readOutcomes, readRides } from "../hits/ledger.ts";
 import { formatMemory } from "../inject/format.ts";
 import { loadAll, malformedCount } from "../store/files/load.ts";
 import { isVisibleTo, readerFromSid } from "../store/model/visibility.ts";
@@ -39,10 +39,14 @@ export const register: ToolRegister = (editor, deps) => {
         // Use ledger (#42): how much of the store has never been surfaced.
         // Reported, never acted on — retirement is a decision, not a metric.
         const ledger = await readLedger();
+        // #332: rides joined to the gate outcome of the turn they rode. Read
+        // only here — the epoch payload path deliberately skips it, so the
+        // per-request path never pays two extra ledger reads.
         const { active: act, counts: store } = summarizeStore(
           all,
           ledger,
           malformed,
+          { rides: await readRides(), outcomes: await readOutcomes() },
         );
         // Self-metrics (#44): what the store costs, how fast it grows, and how
         // stale a capture is when it fires. Same rule as above — the numbers

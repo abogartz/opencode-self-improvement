@@ -25,7 +25,11 @@ import {
   hitsFile,
   neverRetrieved,
   readLedger,
+  joinUseWithOutcomes,
   recordHits,
+  recordOutcome,
+  readOutcomes,
+  readRides,
   resetHitThrottle,
   resetLedgerCache,
   useSignals,
@@ -37,6 +41,10 @@ import { scoreMemories, words } from "../src/recall/score.ts";
 import { sharedTerms } from "../src/recall/shared-terms.ts";
 import { ledgerIsYoung } from "../src/status/metrics.ts";
 import { renderMemoryReport } from "../src/status/report.ts";
+import {
+  EVICT_MIN_RIDES,
+  summarizeStore,
+} from "../src/status/store-summary.ts";
 import type { Memory } from "../src/store/model/memory.ts";
 import { LOCK_WRITE, lockFileFor, withStoreLock } from "../src/store/lock.ts";
 
@@ -462,6 +470,47 @@ describe("the surfaces read the ledger honestly", () => {
     expect(ledgerIsYoung(store.ledgerSince)).toBe(true);
   });
 
+  // #332: the outcome line is the only place a user learns what the join can
+  // and cannot claim. It must state the floor and the correlation, in-line.
+  test("the outcome line states the correlation and never claims a cause", () => {
+    const base = {
+      active: 10,
+      superseded: 0,
+      open: 0,
+      scopes: 3,
+      malformed: 0,
+      neverRetrieved: 7,
+      ledgerSince: day(45),
+    };
+    const withOutcomes = renderMemoryReport({
+      status: null,
+      store: {
+        ...base,
+        useOutcome: {
+          rowsMeasured: 4,
+          joined: 9,
+          clean: 6,
+          failAfter: 3,
+          evictCandidates: 2,
+        },
+      },
+      blocked: [],
+    });
+    expect(withOutcomes).toInclude(
+      "outcome-linked 9 rides over 4 rows: 6 on turns whose gate passed, 3 on turns whose gate failed",
+    );
+    expect(withOutcomes).toInclude(
+      `2 candidates at ≥${EVICT_MIN_RIDES} rides with no clean turn`,
+    );
+    expect(withOutcomes).toInclude("correlation on the ride's own turn");
+    // The line must not read as a verdict on the rows.
+    expect(withOutcomes).not.toInclude("harmful");
+    // And a caller that did not run the join prints no outcome line at all.
+    expect(
+      renderMemoryReport({ status: null, store: base, blocked: [] }),
+    ).not.toInclude("outcome-linked");
+  });
+
   test("an empty ledger says so, and a covered window drops the qualifier", () => {
     const base = {
       active: 4,
@@ -538,3 +587,264 @@ describe.skipIf(process.platform !== "win32")(
     });
   },
 );
+
+// --- the row-to-outcome edge (#332) ------------------------------------------------
+//
+// The ledger used to record that a row rode and nothing about what happened
+// next, so a row that reliably misled the agent accrued hits and got BOOSTED by
+// `useBoost`. These tests pin the minimum that makes usefulness measurable: a
+// turn on the ride, a gate verdict for that turn, and a join that refuses to
+// claim more than it saw.
+
+describe("rides carry the turn they landed on (#332)", () => {
+  test("a known turn is written; an unknown one is absent, never zero", async () => {
+    expect(
+      await recordHits(
+        "inject",
+        "ses-turn",
+        [row("2026-01-01T00:00:00.000Z")],
+        ["build"],
+        Date.parse("2026-06-01T00:00:00Z"),
+        4,
+      ),
+    ).toBe(true);
+    expect(ledgerText()).toInclude("turn=4");
+
+    expect(
+      await recordHits(
+        "recall",
+        "ses-turn-2",
+        [row("2026-01-02T00:00:00.000Z")],
+        ["build"],
+        Date.parse("2026-06-01T00:00:01Z"),
+      ),
+    ).toBe(true);
+    const lines = ledgerText().trim().split("\n");
+    expect(lines[lines.length - 1]).not.toInclude("turn=");
+  });
+
+  test("readRides keeps the (sid, turn) grouping readLedger aggregates away", async () => {
+    await recordHits(
+      "inject",
+      "ses-join",
+      [row("2026-01-01T00:00:00.000Z"), row("2026-01-03T00:00:00.000Z")],
+      ["tax"],
+      Date.parse("2026-06-01T00:00:00Z"),
+      7,
+    );
+    const rides = await readRides();
+    expect(rides.length).toBe(1);
+    expect(rides[0]).toMatchObject({ sid: "ses-join", turn: 7 });
+    expect(rides[0]!.mems).toEqual([
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-03T00:00:00.000Z",
+    ]);
+  });
+});
+
+describe("turn outcomes", () => {
+  test("one line per gate check, readable back as PASS or FAIL", async () => {
+    expect(
+      await recordOutcome(
+        "ses-out",
+        2,
+        "FAIL",
+        "tsc",
+        Date.parse("2026-06-01T00:00:00Z"),
+      ),
+    ).toBe(true);
+    expect(
+      await recordOutcome(
+        "ses-out",
+        3,
+        "PASS",
+        "test",
+        Date.parse("2026-06-01T00:01:00Z"),
+      ),
+    ).toBe(true);
+    const got = await readOutcomes();
+    expect(got).toEqual([
+      {
+        ts: "2026-06-01T00:00:00.000Z",
+        sid: "ses-out",
+        turn: 2,
+        outcome: "FAIL",
+        cmd: "tsc",
+      },
+      {
+        ts: "2026-06-01T00:01:00.000Z",
+        sid: "ses-out",
+        turn: 3,
+        outcome: "PASS",
+        cmd: "test",
+      },
+    ]);
+  });
+
+  test("an outcome line is not a ride, and a ride line is not an outcome", async () => {
+    await recordOutcome("ses-mix", 1, "PASS", "tsc");
+    await recordHits(
+      "inject",
+      "ses-mix",
+      [row("2026-01-01T00:00:00.000Z")],
+      ["tsc"],
+      Date.now(),
+      1,
+    );
+    expect((await readOutcomes()).length).toBe(1);
+    expect((await readRides()).length).toBe(1);
+    // The pre-existing reader must skip the new kind, not count it as a use.
+    const ledger = await readLedger();
+    expect(ledger.lines).toBe(1);
+  });
+
+  test("a session id or a turn that is not a number records nothing", async () => {
+    expect(await recordOutcome("", 1, "PASS", "tsc")).toBe(false);
+    expect(await recordOutcome("ses-x", Number.NaN, "PASS", "tsc")).toBe(false);
+  });
+});
+
+describe("joinUseWithOutcomes claims only what it saw", () => {
+  const ride = (sid: string, turn: number | undefined, mems: string[]) => ({
+    ts: "2026-06-01T00:00:00.000Z",
+    src: "inject" as const,
+    sid,
+    mems,
+    terms: [],
+    ...(turn === undefined ? {} : { turn }),
+  });
+
+  test("a ride on a passing turn is clean, on a failing turn is failAfter", () => {
+    const joined = joinUseWithOutcomes(
+      [ride("s", 1, ["a"]), ride("s", 2, ["b"])],
+      [
+        { ts: "", sid: "s", turn: 1, outcome: "PASS", cmd: "tsc" },
+        { ts: "", sid: "s", turn: 2, outcome: "FAIL", cmd: "test" },
+      ],
+    );
+    expect(joined.get("a")).toEqual({
+      rides: 1,
+      joined: 1,
+      clean: 1,
+      failAfter: 0,
+    });
+    expect(joined.get("b")).toEqual({
+      rides: 1,
+      joined: 1,
+      clean: 0,
+      failAfter: 1,
+    });
+  });
+
+  test("a ride with no turn, or in a session with no gate, is a ride only", () => {
+    const joined = joinUseWithOutcomes(
+      [ride("s", undefined, ["a"]), ride("s", 9, ["b"])],
+      [{ ts: "", sid: "s", turn: 1, outcome: "PASS", cmd: "tsc" }],
+    );
+    expect(joined.get("a")).toEqual({
+      rides: 1,
+      joined: 0,
+      clean: 0,
+      failAfter: 0,
+    });
+    expect(joined.get("b")).toEqual({
+      rides: 1,
+      joined: 0,
+      clean: 0,
+      failAfter: 0,
+    });
+  });
+
+  test("a failing gate wins the turn even when a later gate passed it", () => {
+    const joined = joinUseWithOutcomes(
+      [ride("s", 4, ["a"])],
+      [
+        { ts: "", sid: "s", turn: 4, outcome: "PASS", cmd: "lint" },
+        { ts: "", sid: "s", turn: 4, outcome: "FAIL", cmd: "test" },
+      ],
+    );
+    expect(joined.get("a")).toEqual({
+      rides: 1,
+      joined: 1,
+      clean: 0,
+      failAfter: 1,
+    });
+  });
+
+  test("the same turn number in a different session does not join", () => {
+    const joined = joinUseWithOutcomes(
+      [ride("s1", 1, ["a"])],
+      [{ ts: "", sid: "s2", turn: 1, outcome: "FAIL", cmd: "test" }],
+    );
+    expect(joined.get("a")).toEqual({
+      rides: 1,
+      joined: 0,
+      clean: 0,
+      failAfter: 0,
+    });
+  });
+});
+
+describe("summarizeStore reports eviction candidates without acting", () => {
+  const active = (ts: string): Memory => ({ ...row(ts), status: "settled" });
+
+  test("five rides with no clean turn is a candidate; one clean turn clears it", () => {
+    const rides = [
+      ...Array.from({ length: 5 }, (_, i) => ({
+        ts: `2026-06-0${i + 1}T00:00:00.000Z`,
+        src: "inject" as const,
+        sid: `s${i}`,
+        mems: ["bad"],
+        terms: [],
+        turn: 1,
+      })),
+      ...Array.from({ length: 5 }, (_, i) => ({
+        ts: `2026-06-0${i + 1}T00:00:00.000Z`,
+        src: "inject" as const,
+        sid: `t${i}`,
+        mems: ["mixed"],
+        terms: [],
+        turn: 1,
+      })),
+    ];
+    const outcomes = [
+      ...Array.from({ length: 5 }, (_, i) => ({
+        ts: "",
+        sid: `s${i}`,
+        turn: 1,
+        outcome: "FAIL" as const,
+        cmd: "test",
+      })),
+      ...Array.from({ length: 4 }, (_, i) => ({
+        ts: "",
+        sid: `t${i}`,
+        turn: 1,
+        outcome: "FAIL" as const,
+        cmd: "test",
+      })),
+      { ts: "", sid: "t4", turn: 1, outcome: "PASS" as const, cmd: "test" },
+    ];
+    const { counts } = summarizeStore(
+      [active("bad"), active("mixed"), active("unseen")],
+      { byRow: new Map(), since: null, lines: 0 },
+      0,
+      { rides, outcomes },
+    );
+    expect(counts.useOutcome).toEqual({
+      rowsMeasured: 2,
+      joined: 10,
+      clean: 1,
+      failAfter: 9,
+      evictCandidates: 1,
+    });
+  });
+
+  test("omitting the join leaves the block absent, not zero", () => {
+    const { counts } = summarizeStore(
+      [active("a")],
+      { byRow: new Map(), since: null, lines: 0 },
+      0,
+    );
+    expect(counts.useOutcome).toBeUndefined();
+  });
+});

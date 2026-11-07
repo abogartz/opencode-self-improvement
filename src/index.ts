@@ -73,7 +73,7 @@ import { type Measured, type StoreCounts } from "./status/payload.ts";
 import { renderMemoryReport } from "./status/report.ts";
 import { blockedRecent } from "./status/write.ts";
 import { firstFrontierTap, markFrontierTap } from "./capture/triggers.ts";
-import { setCurrent } from "./core/state.ts";
+import { peekTurns, setCurrent } from "./core/state.ts";
 import {
   resolveRepo,
   setRepoScope,
@@ -196,7 +196,10 @@ const impl = {
       for (const m of rows)
         for (const t of sharedTerms(query, m))
           if (!terms.includes(t)) terms.push(t);
-      await recordHits(src, sid, rows, terms);
+      // #332: the turn is what joins a ride to the outcome of that same turn.
+      // Read, never created-for: markTurn has already run for any session that
+      // can reach a read path, so this does not seed state.
+      await recordHits(src, sid, rows, terms, Date.now(), peekTurns(sid));
     };
     // The host listener owns measured usage; the epoch controller drops it
     // alongside its own maps when the shared session LRU evicts an entry.

@@ -13,6 +13,7 @@ import {
   type StoreCounts,
   emptyStats,
 } from "./payload.ts";
+import { EVICT_MIN_RIDES } from "./store-summary.ts";
 
 function ago(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -273,6 +274,15 @@ export function renderMemoryReport(input: {
       : "";
     out.push(
       `  retrieved ${used} rows in the last 30d; never retrieved ${store.neverRetrieved} (${share}%)${basis} — reported, not acted on`,
+    );
+  }
+  if (store.useOutcome) {
+    const u = store.useOutcome;
+    // Every number here is a floor and a correlation. Say it in the line, not
+    // in a footnote nobody reads: only rides that landed on a turn which also
+    // ran a gate command (build/test/lint/typecheck) can be scored at all.
+    out.push(
+      `  outcome-linked ${u.joined} rides over ${u.rowsMeasured} rows: ${u.clean} on turns whose gate passed, ${u.failAfter} on turns whose gate failed; ${u.evictCandidates} candidates at ≥${EVICT_MIN_RIDES} rides with no clean turn — correlation on the ride's own turn, reported, never acted on`,
     );
   }
   const sizing: string[] = [];

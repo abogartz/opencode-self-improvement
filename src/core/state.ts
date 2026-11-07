@@ -141,6 +141,15 @@ export function session(sid: string): SessionState {
   return s;
 }
 
+/**
+ * Turn count for a session ALREADY being tracked, or undefined. Unlike
+ * `session()` this neither creates state nor touches the LRU, so a telemetry
+ * caller can stamp a turn without extending a session's residency (#332).
+ */
+export function peekTurns(sid: string): number | undefined {
+  return sessions.get(sid)?.turns;
+}
+
 let current: { sid: string; call: string; tool: string } = {
   sid: "?",
   call: "?",

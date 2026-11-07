@@ -7,6 +7,7 @@ import { evidenceDir } from "../core/config/paths.ts";
 import { parseLine } from "../core/logfmt/format.ts";
 import { readLines } from "../core/logfmt/read.ts";
 import { redactSecrets } from "../store/secrets.ts";
+import { recordOutcome } from "../hits/ledger.ts";
 import {
   session,
   setLastSeenSid,
@@ -194,6 +195,10 @@ export async function afterTool(
     rec.gateCheck = true;
     rec.cmd = family;
     await record("gate_check", { cmd: family, status }, true, sid);
+    // #332: the same fact in the use ledger, where a ride recorded on this
+    // turn can be joined to it. Evidence is the audit trail — pruned and
+    // quarantined on its own schedule — so the join cannot live there.
+    await recordOutcome(sid ?? "", s.turns, status, family);
     if (status === "FAIL") {
       s.pendingGate = { call, cmd: family, chain: [], count: 0 };
     } else if (s.pendingGate && s.pendingGate.cmd === family) {

@@ -36,6 +36,22 @@ export interface StoreCounts {
    * ledger says so instead of inflating "never" (see `ledgerIsYoung`).
    */
   ledgerSince?: string | null;
+  /**
+   * What the ledger can say about usefulness (#332). A ride joins to an
+   * outcome ONLY when it landed on a turn that also ran a gate command, so
+   * `joined` is far below `rides` by construction and every number here is a
+   * floor: `recordHits` drops writes under lock contention. A FAIL is a
+   * correlation with the ride's own turn, never a proven harm.
+   */
+  useOutcome?: {
+    /** Active rows with at least one joined ride. */
+    rowsMeasured: number;
+    joined: number;
+    clean: number;
+    failAfter: number;
+    /** Rides >= EVICT_MIN_RIDES with zero clean turns. Reported, never acted on. */
+    evictCandidates: number;
+  };
   /** Bytes of store the active rows occupy (canonical logfmt rendering). */
   bytes?: number;
   /** Per-row average of the same, the "what does a row cost" number. */
