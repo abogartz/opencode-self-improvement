@@ -26,6 +26,7 @@ import { formatLine } from "../src/core/logfmt/format.ts";
 import { resetState } from "../src/core/state.ts";
 import { guarded } from "../src/core/hooks.ts";
 import { resetCaptureCooldowns, resetSessionModels } from "../src/index.ts";
+import { resetCaptureCursors } from "../src/capture/policy.ts";
 import { loadAll } from "../src/store/files/load.ts";
 import { isActive } from "../src/store/model/predicates.ts";
 import { setRepoScope } from "../src/identity/repokey.ts";
@@ -51,6 +52,7 @@ beforeEach(() => {
   resetState();
   resetCaptureCooldowns(); // cooldown truth is module-level since #108 - and bun test shares module state across files, so a fresh test needs this explicit clear
   resetSessionModels(); // same module-level truth for the #139 session-model registry
+  resetCaptureCursors(); // #334: the delta cursor and signal window are module-level too
 });
 
 afterEach(() => {
@@ -1286,6 +1288,186 @@ describe("hook_error evidence (#138)", () => {
       .pop();
     expect(line?.hook).toBe("string-throw-hook");
     expect(line?.error).toBe("string");
+    await loaded.cleanup();
+  });
+});
+
+// --- capture cost policy (#334) ---------------------------------------------------
+//
+// Every turn end used to trigger a capture that re-mined the whole session.
+// These pin the two levers that stop paying for work already stored: the signal
+// gate (skip a turn that produced nothing durable) and the delta window (mine
+// only what has not been mined). Both are OFF unless the option says otherwise,
+// so the tests above also prove the default path is unchanged.
+
+const longText = (marker: string) =>
+  `${marker} ${"detail that keeps the transcript above the thin floor ".repeat(6)}`;
+
+const turnEnd = (sid: string) => ({
+  type: "session.execution.succeeded",
+  data: { sessionID: sid },
+});
+
+describe("capture cost policy", () => {
+  test("the signal gate skips a turn that only read files", async () => {
+    const loaded = await loadCapturePlugin({
+      autoCapture: true,
+      captureModel: "fake/model",
+      captureOnSignal: true,
+    });
+    await loaded.sessionHooks.prompt?.({
+      sessionID: "ses-sig",
+      prompt: { text: "look at the pricing module" },
+    });
+    await loaded["tool.execute.after"](
+      {
+        tool: "read",
+        sessionID: "ses-sig",
+        callID: "C1",
+        args: { filePath: "src/pricing.ts" },
+      },
+      { title: "read", output: longText("read-body"), metadata: {} },
+    );
+    loaded.capture.context.messages = [
+      { type: "user", text: longText("look at pricing") },
+      {
+        type: "assistant",
+        content: [{ type: "text", text: longText("it computes tax") }],
+      },
+    ];
+    loaded.capture.events.push(turnEnd("ses-sig"));
+    await Bun.sleep(300);
+    expect(loaded.capture.generate.calls.length).toBe(0);
+    await loaded.cleanup();
+  });
+
+  test("the signal gate captures a turn that edited a file", async () => {
+    const loaded = await loadCapturePlugin({
+      autoCapture: true,
+      captureModel: "fake/model",
+      captureOnSignal: true,
+    });
+    await loaded.sessionHooks.prompt?.({
+      sessionID: "ses-edit",
+      prompt: { text: "fix the tax rate" },
+    });
+    await loaded["tool.execute.after"](
+      {
+        tool: "edit",
+        sessionID: "ses-edit",
+        callID: "C1",
+        args: { filePath: "src/pricing.ts" },
+      },
+      {
+        title: "edit",
+        output: longText("changed TAX_RATE to 0.0825"),
+        metadata: {},
+      },
+    );
+    loaded.capture.context.messages = [
+      { type: "user", text: longText("fix the tax rate") },
+      {
+        type: "assistant",
+        content: [{ type: "text", text: longText("TAX_RATE is now 0.0825") }],
+      },
+    ];
+    loaded.capture.generate.response = "[]";
+    loaded.capture.events.push(turnEnd("ses-edit"));
+    await waitFor(() => loaded.capture.generate.calls.length === 1);
+    await loaded.cleanup();
+  });
+
+  test("the delta window mines only what came after the last capture", async () => {
+    const loaded = await loadCapturePlugin({
+      autoCapture: true,
+      captureModel: "fake/model",
+      captureDelta: true,
+    });
+    const first = [
+      { type: "user", text: longText("ALPHA-request fix pricing") },
+      {
+        type: "assistant",
+        content: [
+          { type: "text", text: longText("ALPHA-answer tax is 0.0825") },
+        ],
+      },
+    ];
+    loaded.capture.context.messages = first;
+    loaded.capture.generate.response = "[]";
+    await loaded.sessionHooks.prompt?.({
+      sessionID: "ses-delta",
+      prompt: { text: longText("ALPHA") },
+    });
+    loaded.capture.events.push(turnEnd("ses-delta"));
+    await waitFor(() => loaded.capture.generate.calls.length === 1);
+    expect(String(loaded.capture.generate.calls[0].prompt)).toInclude(
+      "ALPHA-request",
+    );
+
+    // Second turn: the session context now carries both turns. The cursor says
+    // the first two messages are already mined, so only the new ones go to the
+    // model — which is the whole token saving.
+    resetCaptureCooldowns();
+    loaded.capture.context.messages = [
+      ...first,
+      { type: "user", text: longText("BETA-request fix shipping") },
+      {
+        type: "assistant",
+        content: [
+          { type: "text", text: longText("BETA-answer free at 100.00") },
+        ],
+      },
+    ];
+    await loaded.sessionHooks.prompt?.({
+      sessionID: "ses-delta",
+      prompt: { text: longText("BETA") },
+    });
+    loaded.capture.events.push(turnEnd("ses-delta"));
+    await waitFor(() => loaded.capture.generate.calls.length === 2);
+    const second = String(loaded.capture.generate.calls[1].prompt);
+    expect(second).toInclude("BETA-request");
+    expect(second).not.toInclude("ALPHA-request");
+    await loaded.cleanup();
+  });
+
+  test("without the option, a second capture still sees the whole session", async () => {
+    const loaded = await loadCapturePlugin({
+      autoCapture: true,
+      captureModel: "fake/model",
+    });
+    const first = [
+      { type: "user", text: longText("ALPHA-request fix pricing") },
+      {
+        type: "assistant",
+        content: [{ type: "text", text: longText("ALPHA-answer") }],
+      },
+    ];
+    loaded.capture.context.messages = first;
+    loaded.capture.generate.response = "[]";
+    await loaded.sessionHooks.prompt?.({
+      sessionID: "ses-full",
+      prompt: { text: longText("ALPHA") },
+    });
+    loaded.capture.events.push(turnEnd("ses-full"));
+    await waitFor(() => loaded.capture.generate.calls.length === 1);
+    resetCaptureCooldowns();
+    loaded.capture.context.messages = [
+      ...first,
+      { type: "user", text: longText("BETA-request fix shipping") },
+      {
+        type: "assistant",
+        content: [{ type: "text", text: longText("BETA-answer") }],
+      },
+    ];
+    await loaded.sessionHooks.prompt?.({
+      sessionID: "ses-full",
+      prompt: { text: longText("BETA") },
+    });
+    loaded.capture.events.push(turnEnd("ses-full"));
+    await waitFor(() => loaded.capture.generate.calls.length === 2);
+    const second = String(loaded.capture.generate.calls[1].prompt);
+    expect(second).toInclude("BETA-request");
+    expect(second).toInclude("ALPHA-request"); // today's behaviour, unchanged
     await loaded.cleanup();
   });
 });
