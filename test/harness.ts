@@ -150,6 +150,9 @@ export interface CaptureFakes {
     // AFTER logging the call, so a test can park the plugin mid-model-call and
     // interleave other work before releasing it — no sleep-based races.
     park?: Promise<unknown>;
+    // Failure seam: when set, the stub throws this instead of replying, so a
+    // test can drive the plugin's capture-failure path.
+    throws?: Error;
   };
   context: {
     calls: string[];
@@ -299,6 +302,7 @@ export async function loadPlugin(
           model: input?.model,
         });
         if (capture.generate.park) await capture.generate.park;
+        if (capture.generate.throws) throw capture.generate.throws;
         return { text: capture.generate.response };
       },
     },

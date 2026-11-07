@@ -335,6 +335,43 @@ describe("flattenTranscript", () => {
     );
   });
 
+  // Live opencode 2.2.5 recording (test/fixtures/host-session-context-2.2.5.json,
+  // captured from `session.context()` on a real server): the role moved from
+  // `role`/`info.role` into `type`, and the parts moved from `parts` into
+  // `content[]`. Reading only the V1 keys rendered EVERY 2.2.5 session as a
+  // 0-character transcript, and the 200-character floor then skipped capture in
+  // silence — the reason auto-capture had never fired on a live host.
+  test("renders the live 2.2.5 shape: role in `type`, parts in `content[]`", async () => {
+    const msgs = await Bun.file(
+      `${import.meta.dir}/fixtures/host-session-context-2.2.5.json`,
+    ).json();
+    const out = flattenTranscript(msgs);
+    expect(out).toContain("user: ");
+    expect(out).toContain("assistant: ");
+    expect(out).not.toContain("idle:"); // a non-conversation record, not a role
+    // Reasoning stays private even when it arrives under `content`.
+    expect(out).not.toContain("The user is asking me to read src/math.ts");
+  });
+
+  test("2.2.5: a non-conversation record alone renders nothing", () => {
+    expect(flattenTranscript([{ id: "e", type: "idle", outcome: {} }])).toBe(
+      "",
+    );
+    expect(
+      flattenTranscript([
+        { type: "user", text: "run make verify on the build box" },
+        {
+          type: "assistant",
+          content: [
+            { type: "reasoning", text: "private scratch work" },
+            { type: "tool", id: "call_1", name: "bash" },
+            { type: "text", text: "verified" },
+          ],
+        },
+      ]),
+    ).toBe("user: run make verify on the build box\nassistant: verified");
+  });
+
   test("omits reasoning and thinking parts while retaining user and assistant text", () => {
     const msgs = [
       {
@@ -430,6 +467,76 @@ describe("auto-capture end-to-end (turn end -> gate)", () => {
     await waitFor(() => loaded.capture.context.calls.length === 1);
     await sleep(50);
     expect(loaded.capture.generate.calls.length).toBe(0);
+    // The skip must be visible: an unrecorded thin transcript is
+    // indistinguishable from a host that never emitted the trigger, and that
+    // ambiguity is what kept a dead auto-capture looking alive.
+    expect(
+      evidence().some(
+        (l) =>
+          l.ev === "auto_capture_skipped" &&
+          l.reason === "transcript_too_thin" &&
+          l.session === "ses-thin",
+      ),
+    ).toBe(true);
+    await loaded.cleanup();
+  });
+
+  test("the live 2.2.5 context shape reaches the capture model", async () => {
+    const loaded = await loadCapturePlugin({
+      autoCapture: true,
+      captureModel: "fake/model",
+    });
+    await loaded["tool.execute.after"](
+      {
+        tool: "read",
+        sessionID: "ses-225",
+        callID: "C1",
+        args: { filePath: "x.ts" },
+      },
+      { title: "read", output: "content", metadata: {} },
+    );
+    // Recorded from a real 2.2.5 server: role under `type`, parts under
+    // `content[]`, plus a trailing non-conversation `idle` record.
+    loaded.capture.context.messages = await Bun.file(
+      `${import.meta.dir}/fixtures/host-session-context-2.2.5.json`,
+    ).json();
+    loaded.capture.generate.response = "[]";
+    loaded.capture.events.push({
+      type: "session.execution.succeeded",
+      data: { sessionID: "ses-225" },
+    });
+    await waitFor(() => loaded.capture.generate.calls.length === 1);
+    const prompt = String(loaded.capture.generate.calls[0].prompt);
+    expect(prompt).toContain("user:");
+    expect(prompt).toContain("assistant:");
+    expect(prompt).not.toContain("idle:");
+    expect(prompt).not.toContain("The user is asking me to read src/math.ts");
+    await loaded.cleanup();
+  });
+
+  test("a capture that throws is recorded instead of swallowed", async () => {
+    const loaded = await loadCapturePlugin({
+      autoCapture: true,
+      captureModel: "fake/model",
+    });
+    loaded.capture.context.messages = [
+      { role: "user", content: "x".repeat(300) },
+    ];
+    loaded.capture.generate.throws = new Error("capture model exploded");
+    loaded.capture.events.push({
+      type: "session.execution.succeeded",
+      data: { sessionID: "ses-throw" },
+    });
+    await waitFor(() =>
+      evidence().some(
+        (l) => l.ev === "auto_capture_refused" && l.reason === "capture_threw",
+      ),
+    );
+    const line = evidence().find(
+      (l) => l.ev === "auto_capture_refused" && l.reason === "capture_threw",
+    );
+    expect(line?.session).toBe("ses-throw");
+    expect(String(line?.error)).toContain("capture model exploded");
     await loaded.cleanup();
   });
 

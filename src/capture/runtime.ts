@@ -1,17 +1,17 @@
 // Opt-in capture configuration and dispatch (#168). Cooldowns remain process-wide;
 // subscriptions and dispatch closures belong to one setup instance.
 import type { Cleanup } from "@opencode/plugin/promise/plugin";
-import { runWriteGate, type GateContext } from "../gate/gate.ts";
-import { record, recordCaptureLag } from "../evidence/record.ts";
 import { setCurrent } from "../core/state.ts";
-import { bindSessionProvisional, writeTarget } from "../identity/repokey.ts";
+import { record, recordCaptureLag } from "../evidence/record.ts";
+import { type GateContext, runWriteGate } from "../gate/gate.ts";
 import { captureSessionID } from "../identity/host-events.ts";
+import { bindSessionProvisional, writeTarget } from "../identity/repokey.ts";
 import { quarantineCandidate } from "../store/quarantine/quarantine.ts";
 import { redactSecrets } from "../store/secrets.ts";
 import { parseCandidates, parseModelRef } from "./candidates.ts";
-import { sessionModel, type SessionModelRef } from "./session-model.ts";
 import { lagSince } from "./lag.ts";
 import { buildCapturePrompt } from "./prompt.ts";
+import { type SessionModelRef, sessionModel } from "./session-model.ts";
 import { flattenTranscript } from "./transcript.ts";
 
 interface CaptureHost {
@@ -240,7 +240,27 @@ export function configureAutoCapture(
           msgs = await contextFn({ sessionID: sid });
           transcript = flattenTranscript(msgs);
         }
-        if (transcript.length < 200) return; // too thin to mine reliably
+        if (transcript.length < 200) {
+          // This return used to be silent, and that silence is why a dead
+          // auto-capture looked like a working one: "the transcript was too
+          // thin to mine" and "the host never emitted the event" produced
+          // byte-identical stores. Record the skip with its size so the two
+          // are distinguishable from the evidence file alone.
+          await record(
+            "auto_capture_skipped",
+            {
+              session: sid,
+              trigger,
+              reason: "transcript_too_thin",
+              chars: transcript.length,
+              ...(modelTag ? { model: modelTag } : {}),
+            },
+            true,
+            sid,
+            captureGate.evidenceContext,
+          );
+          return; // too thin to mine reliably
+        }
         // #44: how stale is a capture? Distance from the newest message of
         // the mined transcript to this instant - measured on whatever the
         // trigger actually mined (the hook payload for compaction, the
@@ -338,8 +358,24 @@ export function configureAutoCapture(
             if (!captureCooldownPasses("idle", sid, now)) continue; // 5-min cooldown, shared across setups
             try {
               await captureSession(sid, "", "idle");
-            } catch {
-              // fail-closed: a broken capture attempt is invisible to the session
+            } catch (err) {
+              // Fail-closed for the SESSION, never silent in the store: the
+              // same silence that hid the 2.2.5 shape break would make a
+              // throwing capture indistinguishable from one that never ran.
+              await record(
+                "auto_capture_refused",
+                {
+                  session: sid,
+                  trigger: "idle",
+                  reason: "capture_threw",
+                  error: redactSecrets(
+                    String((err as Error)?.message ?? err),
+                  ).slice(0, 200),
+                },
+                true,
+                sid,
+                undefined,
+              );
             }
           }
         } catch {

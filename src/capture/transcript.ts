@@ -3,9 +3,30 @@
 // Render an array of session-context messages of unknown shape into
 // "role: text" lines. Defensive by construction (the API shape varies and is
 // not ours to trust): non-arrays and junk entries are skipped; role comes
-// from info.role | role, text from parts[].text | text | content (strings
-// only); capped at 40 user turns. Never throws.
+// from info.role | role | type, text from parts[].text | content[].text |
+// text | content (strings only); capped at 40 user turns. Never throws.
+//
+// The `type` role source and the `content[]` part array are the 2.2.5 host
+// shape, recorded live: `session.context()` returns
+// `{id, time, type:"user", text}` and `{id, time, type:"assistant", content:
+// [{type:"reasoning"|"tool"|"text", ...}]}` — no `role`, no `parts`. Reading
+// only the old keys rendered EVERY 2.2.5 session as a 0-character transcript,
+// which the 200-character floor then skipped in silence: auto-capture never
+// fired on a live host, and nothing said so.
 const TRANSCRIPT_USER_TURN_CAP = 40;
+
+// 2.2.5 also puts NON-conversation records in the same array (`type:"idle"`),
+// so only these values are accepted as a role. Anything else renders nothing.
+const CONVERSATION_ROLES: readonly string[] = ["user", "assistant"];
+
+function roleOf(
+  m: Record<string, unknown>,
+  info: Record<string, unknown> | undefined,
+): string {
+  for (const v of [info?.role, m.role, m.type])
+    if (typeof v === "string" && CONVERSATION_ROLES.includes(v)) return v;
+  return "";
+}
 
 export function flattenTranscript(msgs: unknown): string {
   try {
@@ -19,16 +40,17 @@ export function flattenTranscript(msgs: unknown): string {
         m.info && typeof m.info === "object"
           ? (m.info as Record<string, unknown>)
           : undefined;
-      const role =
-        typeof info?.role === "string"
-          ? info.role
-          : typeof m.role === "string"
-            ? m.role
-            : "";
+      const role = roleOf(m, info);
       let text = "";
       let hadPrivatePart = false;
-      if (Array.isArray(m.parts)) {
-        text = m.parts
+      // V1 carried parts under `parts`; 2.2.5 carries them under `content`.
+      const partList = Array.isArray(m.parts)
+        ? m.parts
+        : Array.isArray(m.content)
+          ? m.content
+          : null;
+      if (partList) {
+        text = partList
           .map((p) => {
             if (!p || typeof p !== "object") return undefined;
             const part = p as Record<string, unknown>;
