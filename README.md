@@ -127,6 +127,8 @@ Nothing is deleted: `memory_update` supersedes the previous row, `memory_forget`
 | User describes how working code behaves | `behavior` | Code is the authority; keep the constant and raise the mismatch with the user. |
 | Authority is unclear | Omit `klass` | Keep plain guidance and its staleness caveat; emit no CONFLICT verdict. |
 
+The code check accepts a unique top-level `const` with a literal value. Comments, string examples, local declarations and computed expressions cannot establish an authority verdict. The scan is limited to 300 source files, 256 KiB per file and depth 3, preferring `src/`; it does not follow source links or resolve imports. Ambiguous declarations, unreadable/invalid source, exhausted budgets or an undecidable claim keep the plain guidance and staleness caveat. The JavaScript/TypeScript parser loads only when an opt-in check runs. Use attribution keeps the stored row's identity and prose while coverage counts only references present in the delivered text.
+
 Accepted residual: a user-stated **wrong spec** still classifies as `spec`. Its verdict follows that stated requirement even if it breaks the current tests. The plugin does not infer hidden-suite authority or silently override the user's requirement. Asking an oracle or inventing an extra authority class is outside this contract. Capture classification can be wrong; a code comparison verifies a value mismatch, not the user's intent. The seat-model runs and merged-main confidence gates in #350–#352 are still required before deciding whether to enable this by default.
 
 ## Repo scoping

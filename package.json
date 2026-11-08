@@ -75,6 +75,7 @@
     "lint": "biome lint && bun run format:check"
   },
   "dependencies": {
+    "@babel/parser": "7.29.9",
     "zod": "4.6.7"
   }
 }

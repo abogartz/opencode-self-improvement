@@ -214,9 +214,17 @@ export function createInjectionEpochs({
     // Refs the ACTUALLY-injected rows assert (paths + commands), the join key
     // for attribution. Derived from the budget-surviving rows, not the wider
     // candidate pool — crediting paths the model never saw would overclaim.
-    const rode = injectedRows(block, sel.selected);
+    const rode = injectedRows(block, sel.selected, sel.rendered);
     const prefix = [...parts, block].join("\u0000");
-    return { parts, block, prefix, rode, refs: deriveMemoryRefs(rode) };
+    // Ledger terms/identities belong to the stored rows, but coverage refs
+    // must describe only the text the model actually received.
+    return {
+      parts,
+      block,
+      prefix,
+      rode,
+      refs: deriveMemoryRefs(rode.map((m) => sel.rendered.get(m) ?? m)),
+    };
   };
   const refreshEpoch = async (sid: string, rows?: Memory[]): Promise<void> => {
     if (!latestPrompt.has(sid)) return;

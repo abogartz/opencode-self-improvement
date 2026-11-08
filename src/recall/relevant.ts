@@ -105,7 +105,11 @@ export async function selectRelevant(
   use?: UseSignals,
   sid?: string,
   opts?: SelectOptions,
-): Promise<{ block: string; selected: Memory[] }> {
+): Promise<{
+  block: string;
+  selected: Memory[];
+  rendered: ReadonlyMap<Memory, Memory>;
+}> {
   // Repo-scoped: model-facing reads see the caller's repo + global rows
   // (their session when one was threaded, #127).
   const mems = (rows ?? visibleTo(await loadAll(), readerFromSid(sid))).filter(
@@ -124,23 +128,24 @@ export async function selectRelevant(
   // key on stored rows. No collision (or no code found, or a computed value
   // the regex cannot decide) leaves the row plain — fail-open to the row,
   // never fail-shut on injection.
-  let shown = guided;
+  const rendered = new Map<Memory, Memory>();
   if (opts?.conflictCheck && opts.repoDir && guided.length) {
-    shown = guided.map((m) => {
-      if (!m.ref || !m.claim || !m.klass) return m;
+    for (const m of guided) {
+      if (!m.ref || !m.claim || !m.klass) continue;
       const fact = findConstant(opts.repoDir!, m.ref);
-      if (!fact || valuesAgree(m.claim, fact.value)) return m;
-      return { ...m, content: conflictLine(m, fact) };
-    });
+      if (!fact || valuesAgree(m.claim, fact.value) !== false) continue;
+      rendered.set(m, { ...m, content: conflictLine(m, fact) });
+    }
   }
   const text = message.trim();
   const top = text ? scoreMemories(text, mems, limit, use) : [];
-  const merged = [...shown, ...top.filter((m) => !guided.includes(m))];
-  if (!merged.length) return { block: "", selected: [] };
-  const hasConflict = shown.some((m) => m.content.startsWith("CONFLICT ("));
+  const merged = [...guided, ...top.filter((m) => !guided.includes(m))];
+  if (!merged.length) return { block: "", selected: [], rendered };
+  const hasConflict = rendered.size > 0;
   return {
-    block: `## Relevant durable memory${FRAME}${guided.length ? (hasConflict ? CONFLICT_CAVEAT : GUIDED_CAVEAT) : ""}\n${merged.map(formatMemory).join("\n")}`,
+    block: `## Relevant durable memory${FRAME}${guided.length ? (hasConflict ? CONFLICT_CAVEAT : GUIDED_CAVEAT) : ""}\n${merged.map((m) => formatMemory(rendered.get(m) ?? m)).join("\n")}`,
     selected: merged,
+    rendered,
   };
 }
 

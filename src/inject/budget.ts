@@ -59,9 +59,15 @@ export function cappedFrontier(
 // pre-budget candidates — or it would credit the model with paths and commands
 // it was never shown. capToBudget keeps whole lines verbatim, so a candidate is
 // present iff its rendered line is a substring of the block.
-export function injectedRows(block: string, candidates: Memory[]): Memory[] {
+export function injectedRows(
+  block: string,
+  candidates: Memory[],
+  rendered?: ReadonlyMap<Memory, Memory>,
+): Memory[] {
   if (!block) return [];
-  return candidates.filter((m) => block.includes(formatMemory(m)));
+  return candidates.filter((m) =>
+    block.includes(formatMemory(rendered?.get(m) ?? m)),
+  );
 }
 
 // Trim an injection block to `budget` characters at WHOLE-line boundaries:
