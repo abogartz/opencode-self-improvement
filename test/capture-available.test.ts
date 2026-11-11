@@ -169,6 +169,40 @@ describe("capture availability gate (#389)", () => {
     expect((await rowsWith("release")).length).toBe(0);
   });
 
+  test("a restriction ON a declared command is new information — kept", async () => {
+    // Review #397 (WhollyMindless): merely finding a declared command does not
+    // establish that a new instruction about WHEN to avoid it is available.
+    // The approval code and the restriction appear nowhere in the tree.
+    await capture(makeRepo("gate-restriction"), [
+      {
+        type: "blocker",
+        scope: "release2",
+        content:
+          "Never run `npm run deploy` until finance confirms approval code BLUEBIRD.",
+      },
+    ]);
+    expect(
+      evidence().filter((l) => l.ev === "auto_capture_available"),
+    ).toHaveLength(0);
+    expect((await rowsWith("release2")).length).toBe(1);
+  });
+
+  test("a restated clause carrying a new clause is kept", async () => {
+    // Review #397: one old clause matching must not refuse the whole row and
+    // lose the unavailable fact riding it.
+    await capture(makeRepo("mixed"), [
+      {
+        type: "learning",
+        scope: "mixed",
+        content: `${README_TEXT} Finance confirmed the external supplier rate is 1900 basis points.`,
+      },
+    ]);
+    expect(
+      evidence().filter((l) => l.ev === "auto_capture_available"),
+    ).toHaveLength(0);
+    expect((await rowsWith("mixed")).length).toBe(1);
+  });
+
   test("a fact that is nowhere in the tree is kept — this is the transport case", async () => {
     await capture(makeRepo("transport"), [
       {

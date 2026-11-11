@@ -302,28 +302,46 @@ export function availabilityIndex(
 
   return {
     check(content: string): AvailabilityVerdict | null {
-      // Gate first: it reads a handful of small files and is the stronger claim
-      // (the project itself declares the command).
-      const gate = gateHit(statedCommands(content), gates);
-      if (gate) {
-        return {
-          reason: "declared_gate",
-          where: gate.where,
-          matched: norm(content).slice(0, 120),
-        };
-      }
-      if (!haystack) return null;
+      // #397 review (WhollyMindless): matching PART of a candidate does not
+      // establish the WHOLE fact is available. Both rules used to refuse on
+      // one hit, which lost new facts riding a restated fragment — exactly
+      // the rows this gate exists to preserve:
+      //   - a README rule + "; Finance confirmed the supplier rate is 1900"
+      //     refused on the old clause;
+      //   - "Never run `npm run deploy` until finance confirms approval code
+      //     BLUEBIRD" refused because the manifest declares `deploy`, although
+      //     the restriction and the code appear nowhere.
+      // Refusal now requires the whole assertion to be restatable.
       const whole = norm(content);
-      const clauses = [whole, ...whole.split(/[.;:,\n]/)]
+      const clauses = whole
+        .split(/[.;:,\n]/)
         .map((c) => c.trim())
         .filter((c) => c.length >= MIN_CLAUSE);
-      for (const clause of clauses) {
-        const at = haystack.indexOf(clause);
-        if (at >= 0) {
+      const needed = clauses.length ? clauses : [whole];
+      if (haystack) {
+        const hits = needed.map((c) => haystack.indexOf(c));
+        if (hits.every((h) => h >= 0)) {
           return {
             reason: "in_tracked_file",
-            where: relative(repoDir, join(repoDir, fileAt(at))) || "?",
-            matched: clause.slice(0, 120),
+            where: relative(repoDir, join(repoDir, fileAt(hits[0]!))) || "?",
+            matched: needed[0]!.slice(0, 120),
+          };
+        }
+      }
+      // Declared gate: refuse only when the candidate says NOTHING BEYOND the
+      // command. Stripping every stated command span must leave less than a
+      // clause of prose; a clause's worth of restriction, condition or code
+      // is new information the manifest does not carry, and the row is kept.
+      const gate = gateHit(statedCommands(content), gates);
+      if (gate) {
+        let residual = content;
+        for (const span of statedCommands(content))
+          residual = residual.split(span).join(" ");
+        if (norm(residual).length < MIN_CLAUSE) {
+          return {
+            reason: "declared_gate",
+            where: gate.where,
+            matched: norm(content).slice(0, 120),
           };
         }
       }
