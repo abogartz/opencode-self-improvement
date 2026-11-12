@@ -203,6 +203,40 @@ describe("capture availability gate (#389)", () => {
     expect((await rowsWith("mixed")).length).toBe(1);
   });
 
+  test("a SHORT restriction on a declared command is kept (#397 round 2)", async () => {
+    // Review #397 (WhollyMindless): the residual after the command span is
+    // stripped is 27 characters, and the whole fact is in it. The manifest
+    // declares that `deploy` exists; it declares nothing about approval.
+    await capture(makeRepo("gate-short"), [
+      {
+        type: "blocker",
+        scope: "release4",
+        content: "Never run `npm run deploy` without approval.",
+      },
+    ]);
+    expect(
+      evidence().filter((l) => l.ev === "auto_capture_available"),
+    ).toHaveLength(0);
+    expect((await rowsWith("release4")).length).toBe(1);
+  });
+
+  test("a restated clause carrying a SHORT new clause is kept (#397 round 2)", async () => {
+    // Review #397 (WhollyMindless): the new clause is below MIN_CLAUSE, so the
+    // old code dropped it from `needed` and refused on the old clause alone.
+    // A short clause can carry the entire new number.
+    await capture(makeRepo("mixed-short"), [
+      {
+        type: "learning",
+        scope: "mixed2",
+        content: `${README_TEXT}; External rate is 1900.`,
+      },
+    ]);
+    expect(
+      evidence().filter((l) => l.ev === "auto_capture_available"),
+    ).toHaveLength(0);
+    expect((await rowsWith("mixed2")).length).toBe(1);
+  });
+
   test("a fact that is nowhere in the tree is kept — this is the transport case", async () => {
     await capture(makeRepo("transport"), [
       {

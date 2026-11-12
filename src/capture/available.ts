@@ -39,6 +39,20 @@ export type AvailabilityVerdict = {
 // Below this, a "verbatim" hit is coincidence: `the build is green` matches
 // anything. A restated doc sentence is normally longer than this.
 const MIN_CLAUSE = 48;
+// Below MIN_CLAUSE a clause cannot prove a restatement ON ITS OWN, but it is
+// still an assertion, and it is where a short new fact lives: `; External rate
+// is 1900` carries the whole number in 21 characters (#397 review,
+// WhollyMindless). So every clause above MIN_TRACE has to be found before the
+// candidate is refused. Below MIN_TRACE a clause is punctuation, not a claim.
+const MIN_TRACE = 16;
+
+// A condition on a command is information the project's gates do not carry: a
+// manifest declares THAT `deploy` exists, never when it may be run. Length is
+// not evidence here — "Never run `npm run deploy` without approval." is 27
+// characters and the whole fact is the condition (#397 review). Any word on
+// this list in the residual makes the candidate new, and it is kept.
+const RESTRICTION =
+  /\b(never|always|only|must|shall|should|may not|cannot|can't|do not|don't|not|avoid|forbid\w*|prohibit\w*|disallow\w*|without|unless|until|requir\w*|approval|approv\w*|permission|allow\w*|restrict\w*|gated|sign-?off|manually|twice|before|after|during|outside|inside|secret|token|credential|password|confirm\w*|verify\w*)\b/;
 // The scan is bounded by bytes, not files: a monorepo's tracked list is huge and
 // the point is a cheap check, not an index. One capture pass already pays for a
 // model call, which costs far more than this.
@@ -316,7 +330,7 @@ export function availabilityIndex(
       const clauses = whole
         .split(/[.;:,\n]/)
         .map((c) => c.trim())
-        .filter((c) => c.length >= MIN_CLAUSE);
+        .filter((c) => c.length >= MIN_TRACE);
       const needed = clauses.length ? clauses : [whole];
       if (haystack) {
         const hits = needed.map((c) => haystack.indexOf(c));
@@ -330,14 +344,16 @@ export function availabilityIndex(
       }
       // Declared gate: refuse only when the candidate says NOTHING BEYOND the
       // command. Stripping every stated command span must leave less than a
-      // clause of prose; a clause's worth of restriction, condition or code
-      // is new information the manifest does not carry, and the row is kept.
+      // clause of prose, and that prose must carry no condition: a restriction,
+      // a window or a code is new information the manifest does not hold, and
+      // the row is kept however short it is (#397 review).
       const gate = gateHit(statedCommands(content), gates);
       if (gate) {
         let residual = content;
         for (const span of statedCommands(content))
           residual = residual.split(span).join(" ");
-        if (norm(residual).length < MIN_CLAUSE) {
+        const rest = norm(residual);
+        if (rest.length < MIN_CLAUSE && !RESTRICTION.test(rest)) {
           return {
             reason: "declared_gate",
             where: gate.where,
