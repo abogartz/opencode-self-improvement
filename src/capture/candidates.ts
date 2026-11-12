@@ -128,6 +128,19 @@ export function parseCandidates(raw: string, max: number): CaptureCandidate[] {
                 : undefined;
             })()
           : undefined;
+      // Lesson citation (S1, learn-from-failure): shape-checked here, verified
+      // against the tool ledger by the runtime. Only a `blocker` may carry one.
+      // A newline would break the logfmt row, so flattenMemoryText must be a
+      // fixed point — the same discipline as `original` above.
+      const failure =
+        type === "blocker" && typeof o.failure === "string"
+          ? (() => {
+              const s = o.failure.trim();
+              return s && s.length <= 200 && flattenMemoryText(s) === s
+                ? s
+                : undefined;
+            })()
+          : undefined;
       out.push({
         ...(status
           ? { type, scope, content, status }
@@ -135,6 +148,7 @@ export function parseCandidates(raw: string, max: number): CaptureCandidate[] {
         ...(kw ? { kw } : {}),
         ...(guided ? { guided: true, ...conflict } : {}),
         ...(original ? { original } : {}),
+        ...(failure ? { failure } : {}),
       });
     }
     return out;

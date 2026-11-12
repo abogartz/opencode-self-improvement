@@ -29,6 +29,17 @@ export interface CaptureCandidate {
    * so a stored original is the user's own words.
    */
   original?: string;
+  /**
+   * Lesson citation (S1, learn-from-failure): the failing command this
+   * `blocker` row is about. Present only on a lesson, and only ever copied from
+   * the ATTESTED FAILURES block the prompt was given — the runtime re-checks it
+   * against the tool ledger and drops the ROW when it does not appear there.
+   * Unlike a guided `original`, a failed check cannot keep the row and drop the
+   * field: an uncited lesson is not a lesson with a missing annotation, it is a
+   * guess about what is broken. Not stored — it is a write-time gate, so no row
+   * format changes.
+   */
+  failure?: string;
 }
 
 // Keywords are the vocabulary bridge for the strict-paraphrase wall, mined from
@@ -52,6 +63,7 @@ export function buildCapturePrompt(
   max = 3,
   userProse = "",
   known = "",
+  attested?: string[],
 ): string {
   const prose = redactSecrets(userProse).trim();
   const knownList = redactSecrets(known).trim();
@@ -93,6 +105,33 @@ export function buildCapturePrompt(
           // The brief is its own block, so the rule about it is its own too.
           '- The REQUESTS block is what the user asked for in THIS session. Most of it scopes the current job and expires with it. Mine a `preference` from it ONLY when it names a tool, package, format or convention that outlives the task ("we use bun here", "no semicolons"); never from wording that scopes this job ("only touch src/", "do not create tests").',
         ]
+      : []),
+    // S1 (learn-from-failure). Measured on the bench: a session that failed
+    // after 574 s and 33,287 tokens wrote ONE row, and it was a paraphrase of
+    // the task brief. The prompt asked for "blockers hit" in a list of seven
+    // words and never mentioned failure, so there was nothing to answer. What
+    // makes this safe rather than noisy is that the failure list is not the
+    // model's recollection — it is read from the tool ledger, and a lesson
+    // whose citation is not in it is dropped before the write gate.
+    ...(attested
+      ? attested.length
+        ? [
+            "ATTESTED FAILURES (commands that ran in this session and FAILED, with no later pass. This is measured from the tool ledger, not your impression — it is the ONLY evidence of failure you have, and the only thing a lesson may be about):",
+            ...attested.map((f) => `  - ${f}`),
+            "",
+            '- The most valuable thing a session that did not finish can teach a future one is what does not work. For each failure above worth a lesson, emit one row with type "blocker" whose content is a rule in the form: when <condition>, avoid <action>. Name a file or symbol, so the rule can be checked against the code later.',
+            '- Every such row MUST carry "failure": the failing command, copied ONLY from the list above and EXACTLY as written there. A citation taken from anywhere else, or no citation at all, means the row is refused and dropped — never invent a failure, never cite one that later passed.',
+            "- Say what was attempted and what the evidence showed. Do not state a cause you did not prove, and do not store the fix you did not verify: an unverified fix riding a later session is worse than no memory at all.",
+            "- Emit no `blocker` for anything that did not fail here — not a style opinion, not a step that merely took a while, not the task brief.",
+            "",
+          ]
+        : [
+            // Explicit, because silence here reads as "no lesson-worthy failure
+            // occurred", which is a different claim: this session ran no gate at
+            // all, or every gate it ran passed.
+            "No command failed in this session: emit no `blocker` lesson row.",
+            "",
+          ]
       : []),
     // Permission to emit fewer rows is what bounds deliberation. On the
     // reproducing fixture the same seat went 1,095 -> 3,084 completion tokens

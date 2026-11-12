@@ -252,3 +252,55 @@ export function captureSignalSince(
   // signal-bearing turn still mines this one too.
   return { ok: false, why: "no-signal" };
 }
+
+/**
+ * Gate commands that ran in this window, FAILED, and were never followed by a
+ * PASS of the same family. This is the only thing a failure lesson may be about.
+ *
+ * The point is that a lesson must rest on the repo's own verdict, not on the
+ * model's impression of what went wrong. ReMe (Findings ACL 2026) found
+ * selective addition BEATS full addition, because one failed trajectory rarely
+ * carries enough context for a correct analysis and yields misguided
+ * experiences. So this store's failure mode is writing a wrong lesson, not
+ * missing a right one. An unattested lesson is a rumour, and the runtime drops
+ * the row.
+ *
+ * A recovered failure is excluded on purpose: FAIL then PASS means the agent
+ * fixed it, and "do not do what I just did" is only a lesson while the thing is
+ * still broken. `captureSignalSince` reads the same ledger for the opposite
+ * purpose — a recovery is the best REASON to capture, an unrecovered failure is
+ * the best thing to capture.
+ *
+ * One family's recovery does not attest away another family's failure: a
+ * session that got its tests green and its lint red still has an open lint
+ * failure.
+ *
+ * First-failure order, deduped by family, bounded — the block is prompt bytes on
+ * every capture, and a session with more than a handful of failing gates is not
+ * choosing between eight of them.
+ */
+export function attestedGateFailures(
+  s: SessionState,
+  sinceTurn: number,
+): { cmd: string; arg?: string }[] {
+  // Same reasoning as captureSignalSince: with no turn tracking the window is
+  // meaningless rather than empty, and a policy that quietly stops reporting
+  // failures is the failure mode this file exists to avoid.
+  const tracked = s.turns > 0;
+  const out: { cmd: string; arg?: string }[] = [];
+  // Ledger order, not timestamps: `calls` is append-only, which is what
+  // captureSignalSince relies on for the same FAIL-then-PASS question, and it
+  // cannot be undone by two calls sharing a millisecond.
+  s.calls.forEach((c, i) => {
+    if (!c.gateCheck || c.status !== "FAIL" || !c.cmd) return;
+    if (tracked && (c.turn ?? 0) <= sinceTurn) return;
+    if (out.some((f) => f.cmd === c.cmd)) return;
+    if (out.length >= 8) return;
+    const recovered = s.calls
+      .slice(i + 1)
+      .some((l) => l.gateCheck && l.cmd === c.cmd && l.status === "PASS");
+    if (recovered) return;
+    out.push({ cmd: c.cmd, ...(c.arg ? { arg: c.arg } : {}) });
+  });
+  return out;
+}

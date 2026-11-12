@@ -10,6 +10,7 @@ import { canonicalFile, memoryRoot } from "../core/config/paths.ts";
 import { bracketList, parseLine } from "../core/logfmt/format.ts";
 import { readLines } from "../core/logfmt/read.ts";
 import { appendMemory } from "../store/files/append.ts";
+import { valueConflicts } from "./value-conflict.ts";
 import { loadScope } from "../store/files/load.ts";
 import { snapshotFiles } from "../store/files/snapshots.ts";
 import {
@@ -905,6 +906,19 @@ export async function runWriteGate(
     return { action: "collapsed", chain, collapsedWith: collapseMatch.ts };
   }
 
+  // #390 plan: live rows the incoming row CORRECTS, computed before the append
+  // because the retirement pointer must name the ts the append creates — and
+  // the marking must wait until the append actually lands, or a blocked write
+  // would delete the old value with no successor behind it. An open planning
+  // row and a quarantined row never retire settled facts.
+  const conflictPlan =
+    (candidate.status ?? "settled") === "settled" && !isQuarantined(candidate)
+      ? valueConflicts(
+          candidate,
+          active.filter((m) => m.ts !== ctx.supersedesTs),
+        )
+      : [];
+
   // The write is specifically promoted on engagement (no refs, no gate check,
   // not canonical, not an open object). Emitted so the precedent is auditable.
   const groundedByEngagement =
@@ -950,6 +964,41 @@ export async function runWriteGate(
   // outcome carries the error instead.
   let evidenceError: string | undefined;
   try {
+    // #390 apply: the append landed, so the retired rows now have a named
+    // successor. Ledger first (markManySupersededReport appends to ctx.durable
+    // after each publish), evidence only for rows THIS call actually retired
+    // (#208's attribution rule) — a row retired out-of-band belongs to the
+    // other session's chain.
+    if (conflictPlan.length > 0) {
+      const { marked } = await markManySupersededReport(
+        conflictPlan.map((c) => ({
+          ts: c.ts,
+          fields: {
+            superseded_by: ts,
+            reason: "numeric_conflict",
+            symbol: c.symbol,
+            from: c.from,
+            to: c.to,
+          },
+        })),
+        ctx.durable,
+      );
+      const retired = new Set(marked);
+      for (const c of conflictPlan) {
+        if (!retired.has(c.ts)) continue;
+        if (!supersededTs) supersededTs = c.ts;
+        await rec("superseded_by", {
+          gate: 2,
+          mem: c.ts,
+          target: ts,
+          reason: "numeric_conflict",
+          symbol: c.symbol,
+          from: c.from,
+          to: c.to,
+          chain,
+        });
+      }
+    }
     await rec("write_promoted", {
       gate: 4,
       op: "write",

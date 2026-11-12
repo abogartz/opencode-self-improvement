@@ -93,9 +93,23 @@ export function hasEngagement(sid: string): boolean {
   return session(sid).sawEngagement;
 }
 
+// A gate is a command whose exit status is the repo's own verdict on the work:
+// a test run, a typecheck, a lint, a build. `gateRecovered` (FAIL then PASS of
+// the same family) is the strongest capture signal there is, and attested
+// failure lessons are keyed on it.
+//
+// `test` was missing from this table, so `bun test`, `npm test` and `pytest`
+// registered as no gate at all: a session could go red-green-red and the ledger
+// would never see it. The matcher is anchored on the RUNNER rather than on the
+// word, because the word appears everywhere in a repo that has a test directory
+// — `ls src/test` and `cat test/fixtures/a.json` are not test runs.
 const GATE_CMDS: [RegExp, string][] = [
   [/vitest/, "vitest"],
   [/playwright/, "playwright"],
+  [/(?:^|[\s;&|(])(?:bun|npm|pnpm|yarn|deno|npx)\s+(?:run\s+)?test\b/, "test"],
+  [/(?:^|[\s;&|(])(?:pytest|py\.test)\b/, "test"],
+  [/(?:^|[\s;&|(])go\s+test\b/, "test"],
+  [/(?:^|[\s;&|(])make\s+test\b/, "test"],
   [/lint/, "lint"],
   [/build:source|tsc\b/, "tsc"],
 ];
