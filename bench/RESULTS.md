@@ -5,7 +5,10 @@ synthetic timestamps, no wall clock in the output — reruns are byte-identical)
 The numbers come from the plugin's real injection code (`src/inject.ts`):
 a seeded store of 50 memories, a simulated session of
 20 user prompts with 3 mid-session store writes, and the default
-1200-character budget. Every column is measured on the FULL memory section
+1200-character budget. The relevance block is budgeted by priority inside
+the selector (`selectRelevant`, #388) and then rendered newest-first, so B/C/D
+measure the shipped budget path and not a trim of the rendered string. Every
+column is measured on the FULL memory section
 (digest + frontier + relevance block) — the bytes a request actually sends,
 because prompt caching is a property of those bytes and not of the block alone.
 

@@ -12,6 +12,7 @@ import {
 import { EmptyArgs, validated } from "./schema.ts";
 import {
   captureHealth,
+  captureCost,
   captureLag,
   captureLagLines,
   rowsPerDay,
@@ -57,6 +58,9 @@ export const register: ToolRegister = (editor, deps) => {
         store.rowsPerDay = rowsPerDay(act) ?? undefined;
         const evidenceLines = await captureLagLines();
         store.captureLag = captureLag(evidenceLines);
+        // #387: the plugin's own model calls, billed. Same evidence read, so
+        // the number cannot disagree with the lag line above it.
+        store.captureCost = captureCost(evidenceLines);
         return {
           content: renderMemoryReport({
             status,

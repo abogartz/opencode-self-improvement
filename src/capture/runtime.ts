@@ -522,20 +522,23 @@ export function configureAutoCapture(
             lessonSet.add(normWs(f.slice(sep + 3)).toLowerCase());
           }
         }
+        // Hoisted so its length can be billed below.
+        // Redact the COMPLETE transcript, THEN apply the character budget
+        // (#132). Cropping first can start the window INSIDE a credential:
+        // a PEM body whose BEGIN marker fell off, or a token whose prefix
+        // fell off, matches no pattern — buildCapturePrompt's own scrub
+        // (kept, defense in depth) cannot recognize a fragment.
+        const capturePrompt = buildCapturePrompt(
+          redactSecrets(work).slice(-7000),
+          captureMax,
+          redactSecrets(userProse).slice(-1500),
+          knownRows,
+          attested,
+        );
+        const promptChars = capturePrompt.length;
         const out = await generateApi.text({
           model,
-          // Redact the COMPLETE transcript, THEN apply the character budget
-          // (#132). Cropping first can start the window INSIDE a credential:
-          // a PEM body whose BEGIN marker fell off, or a token whose prefix
-          // fell off, matches no pattern — buildCapturePrompt's own scrub
-          // (kept, defense in depth) cannot recognize a fragment.
-          prompt: buildCapturePrompt(
-            redactSecrets(work).slice(-7000),
-            captureMax,
-            redactSecrets(userProse).slice(-1500),
-            knownRows,
-            attested,
-          ),
+          prompt: capturePrompt,
         });
         const text = typeof out === "string" ? out : (out?.text ?? "");
         // #211: disposed while the model call was in flight. Stop here — the
@@ -544,6 +547,32 @@ export function configureAutoCapture(
         // is the ENOENT teardown noise this check exists to eliminate, and
         // the drain in cleanup means the pass is finished, not lost mid-air.
         if (controller.signal.aborted) return;
+        // #387: bill our own call. `generate.text` resolves to `{ text }` and
+        // nothing else — no `usage`, no `tokens` (probed against the running
+        // host) — and capture is not part of any session's event stream, so a
+        // meter reading the session reports zero for it. chars/4 is an
+        // estimate and the line says `receipt=none` so it can never be quoted
+        // as a provider number.
+        //
+        // Deliberately AFTER the teardown check above: a disposed pass has no
+        // store left to write to. Its tokens therefore go unbilled here, which
+        // undercounts by one call at teardown rather than throwing ENOENT out
+        // of a receipt path that must never break a session.
+        await record(
+          "capture_cost",
+          {
+            session: sid,
+            trigger,
+            prompt_chars: promptChars,
+            text_chars: text.length,
+            est_tokens: Math.ceil((promptChars + text.length) / 4),
+            receipt: "none",
+            ...(modelTag ? { model: modelTag } : {}),
+          },
+          true,
+          sid,
+          captureGate.evidenceContext,
+        );
         let candidates = parseCandidates(text, captureMax);
         // Deterministic guided pre-pass (POC, FINDINGS 2026-11-08 §4, option
         // `captureGuidedRules`): the user's own lines decide what is guided —

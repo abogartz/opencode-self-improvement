@@ -81,6 +81,74 @@ export async function captureLagLines(days = 30): Promise<string[]> {
 }
 
 /**
+ * What the plugin's own model calls cost (#387).
+ *
+ * Capture is a separate `generate.text` call made after the turn, so it appears
+ * in NO session's usage: read from the session event stream the plugin's cost
+ * is exactly zero, which is how it was billed for its whole history. The host
+ * exposes no receipt either — `ctx.generate` has one member, `text`, and it
+ * resolves to `{ text }` with no `usage` and no `tokens` (probed against the
+ * running host, 2026-11-11). So this is an ESTIMATE, labelled as one on every
+ * line, and the honest alternative to it is silence rather than a rounder number.
+ *
+ * Estimate is chars/4 both ways, the same convention `estTok` uses for the
+ * injected block. It cannot see reasoning tokens, which on a local seat are the
+ * bulk of a capture completion (measured 94%), so it UNDERSTATES. Say so where
+ * it is rendered.
+ */
+export interface CaptureCost {
+  /** Capture model calls that completed in the window. */
+  calls: number;
+  /** Distinct sessions those calls belong to. */
+  sessions: number;
+  promptChars: number;
+  textChars: number;
+  /** chars/4, both directions summed. An estimate, never a receipt. */
+  estTokens: number;
+  /** Always "estimate": no provider receipt exists for these calls. */
+  source: "estimate";
+}
+
+export function captureCost(
+  lines: string[],
+  days = 30,
+  now = Date.now(),
+): CaptureCost {
+  const cutoff = new Date(now - days * 86_400_000).toISOString();
+  const out: CaptureCost = {
+    calls: 0,
+    sessions: 0,
+    promptChars: 0,
+    textChars: 0,
+    estTokens: 0,
+    source: "estimate",
+  };
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const f = parseLine(line);
+    if (!f || f.ev !== "capture_cost") continue;
+    if (typeof f.ts === "string" && f.ts < cutoff) continue;
+    // A blank or non-numeric count is skipped, NOT read as zero: `Number("")`
+    // is 0, so a line whose count failed to render would be billed as a free
+    // capture — the exact error this whole ticket exists to remove.
+    const raw = f.prompt_chars;
+    const chars =
+      typeof raw === "string" && raw.trim() !== "" ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(chars) || chars < 0) continue;
+    out.calls++;
+    out.promptChars += chars;
+    out.textChars += Number(f.text_chars) || 0;
+    out.estTokens +=
+      Number(f.est_tokens) ||
+      Math.ceil((chars + (Number(f.text_chars) || 0)) / 4);
+    const sid = typeof f.session === "string" ? f.session : "";
+    if (sid) seen.add(sid);
+  }
+  out.sessions = seen.size;
+  return out;
+}
+
+/**
  * Capture health (#138): the answer to "is auto-capture off, misconfigured,
  * armed-but-inert, or alive?" read from the evidence file ALONE — the
  * `plugin_load` heartbeat names the configured state, `auto_capture_*` lines

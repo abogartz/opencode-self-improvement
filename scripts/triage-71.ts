@@ -24,8 +24,26 @@ if (!beforePath || !afterPath)
     "usage: bun scripts/triage-71.ts before.jsonl after.jsonl [output.json]",
   );
 
+// A missing input is a documented state, not a crash: raw sweep logs no longer
+// live in the checkout (#232). Name the command that produces the file, or say
+// plainly when a file is authored input that cannot be regenerated.
+function readRequired(path: string, hint: string): string {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT")
+      throw new Error(`${path}: not found. ${hint}`);
+    throw err;
+  }
+}
+
+const SWEEP_HINT =
+  "Raw sweep logs are not committed (#232). Regenerate one with " +
+  "`bun scripts/test-sweep.ts --log=<path>`; the pinned #71 pair was produced on " +
+  "the #195 branch — see bench/test-sweep-results.md.";
+
 function readSweep(path: string) {
-  const events: Event[] = readFileSync(path, "utf8")
+  const events: Event[] = readRequired(path, SWEEP_HINT)
     .trim()
     .split(/\r?\n/)
     .map((line) => JSON.parse(line));
@@ -80,7 +98,11 @@ const after = readSweep(afterPath);
 if (before.results.some((event, i) => event.mutant !== after.results[i].mutant))
   throw new Error("different mutant catalogs");
 const reasons: Record<string, string> = JSON.parse(
-  readFileSync(join(root, "bench/test-integrity-71-verdicts.json"), "utf8"),
+  readRequired(
+    join(root, "bench/test-integrity-71-verdicts.json"),
+    "This file is authored input (one written verdict per test file), not sweep " +
+      "output — restore it from git; no command regenerates it.",
+  ),
 );
 const files = readdirSync(join(root, "test"))
   .filter((file) => file.endsWith(".test.ts"))

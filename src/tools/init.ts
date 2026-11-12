@@ -19,7 +19,7 @@ export const register: ToolRegister = (editor, deps) => {
     validated(InitArgs, {
       name: "memory_init",
       description:
-        "Initialize repository memory: re-derives build/lint/test/typecheck command memories through the write gate and stores an init stamp keyed on git HEAD. Idempotent: a no-op when the stamp matches HEAD, unless force=true (refresh after a refactor).",
+        "Initialize repository memory: re-derives build/lint/test/typecheck command memories through the write gate and records an init stamp keyed on git HEAD. The stamp is plugin bookkeeping under <memory-root>/init-stamps/, not a memory row, so no session can forge it (#374). Idempotent: a no-op when the stamp matches HEAD, unless force=true (refresh after a refactor).",
       options: direct,
       async execute(args, context): Promise<{ content: string }> {
         const { sid } = toolIds(context);

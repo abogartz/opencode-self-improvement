@@ -72,6 +72,15 @@ export interface SelectOptions {
    * no check: rows render plainly, exactly as before the feature.
    */
   repoDir?: string;
+  /**
+   * Character budget for the block (#388). Applied to the PRIORITY order —
+   * guided lane first, then score — so pressure drops the least RELEVANT row.
+   * Capping the rendered string instead would let recency decide who rides,
+   * because the rendered order is canonical and not score-derived. Absent
+   * means unbounded, which is what the callers that cap the string themselves
+   * have always had.
+   */
+  budget?: number;
 }
 
 /** Row carries the hint-channel tag (written by capture for user-stated facts). */
@@ -139,11 +148,90 @@ export async function selectRelevant(
   }
   const text = message.trim();
   const top = text ? scoreMemories(text, mems, limit, use) : [];
-  const merged = [...guided, ...top.filter((m) => !guided.includes(m))];
+  const rest = top.filter((m) => !guided.includes(m));
+  const merged = [...guided, ...rest];
   if (!merged.length) return { block: "", selected: [], rendered };
-  const hasConflict = rendered.size > 0;
+  const lines = merged.map((m) => formatMemory(rendered.get(m) ?? m));
+  // The caveat must describe the rows that ACTUALLY ride, so it cannot be fixed
+  // before the budget runs (it used to be, and a budget that dropped the only
+  // CONFLICT row still rendered "CONFLICT rows were code-checked … follow their
+  // Action" over a block with none). The caveat also decides the header width
+  // the budget is measured against, so the FIT uses the widest header this
+  // selection can still produce and the RENDERED header is chosen afterwards
+  // from the survivors. Re-fitting on the narrower header instead oscillates:
+  // dropping the CONFLICT row shortens the header, which lets it fit again.
+  const baseHeader = `## Relevant durable memory${FRAME}`;
+  const widestCaveat = rendered.size
+    ? CONFLICT_CAVEAT
+    : guided.length
+      ? GUIDED_CAVEAT
+      : "";
+  const fitHeader = baseHeader + widestCaveat;
+  const caveatFor = (survivors: number[]): string => {
+    let guidedRides = false;
+    let conflictRides = false;
+    for (const i of survivors) {
+      const m = merged[i];
+      if (!m) continue;
+      if (guided.includes(m)) guidedRides = true;
+      if (rendered.has(m)) conflictRides = true;
+    }
+    return !guidedRides ? "" : conflictRides ? CONFLICT_CAVEAT : GUIDED_CAVEAT;
+  };
+  // PRIORITY decides who rides; CANONICAL order decides how they are shown.
+  // The rendered bytes are the prompt-cache key (src/inject/epochs.ts joins
+  // them onto the system parts), and score order is a function of the live
+  // prompt — so two turns that selected the same rows in a different rank
+  // order re-billed the whole prefix to tell the model what it already knew.
+  // `selected` keeps score order: the use ledger and attribution credit the
+  // ranking, and a miss has to stay diagnosable.
+  let shown = merged.map((_, i) => i);
+  const budget = opts?.budget;
+  if (budget !== undefined) {
+    // Same whole-line discipline capToBudget uses (skip an over-long line,
+    // keep scanning), applied BEFORE the re-order so relevance still decides.
+    // A block left with nothing but its header renders as nothing — a dangling
+    // "## Relevant durable memory" over zero memories is noise, not memory. A
+    // header too wide for the budget needs no separate guard: `used` starts at
+    // the header width, so no line can clear the test below and the empty
+    // `shown` returns exactly what an explicit header check would.
+    let used = fitHeader.length;
+    shown = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] ?? "";
+      if (used + 1 + line.length > budget) continue;
+      shown.push(i);
+      used += 1 + line.length;
+    }
+    // `selected` keeps the PRE-budget selection even here: the evidence field
+    // `guided=` answers "did the selector pick it", `guidedRode=` answers "did
+    // it survive". Returning [] would make a total trim read as "never picked".
+    if (!shown.length) return { block: "", selected: merged, rendered };
+  }
+  shown.sort((a, b) => {
+    const ma = merged[a];
+    const mb = merged[b];
+    if (!ma || !mb) return 0;
+    const lane = (m: Memory) => (guided.includes(m) ? 0 : 1);
+    if (lane(ma) !== lane(mb)) return lane(ma) - lane(mb);
+    const recency = cmpTs(mb.ts, ma.ts);
+    if (recency !== 0) return recency;
+    // TOTAL order, not merely newest-first. Two rows can share an instant: a
+    // same-millisecond pair, or a legacy second-precision stamp beside a
+    // millisecond stamp for the same instant (`ISO_TS_RE` makes `.000`
+    // optional, so both load). cmpTs returns 0 there and a stable sort falls
+    // back to score order — the prompt-derived order this PR exists to remove,
+    // one row pair away. Content, then the literal ts string, are both
+    // prompt-independent, so the bytes depend on the SET of rows and nothing
+    // else.
+    if (ma.content !== mb.content) return ma.content < mb.content ? -1 : 1;
+    return ma.ts < mb.ts ? -1 : ma.ts > mb.ts ? 1 : 0;
+  });
   return {
-    block: `## Relevant durable memory${FRAME}${guided.length ? (hasConflict ? CONFLICT_CAVEAT : GUIDED_CAVEAT) : ""}\n${merged.map((m) => formatMemory(rendered.get(m) ?? m)).join("\n")}`,
+    block: [
+      baseHeader + caveatFor(shown),
+      ...shown.map((i) => lines[i] ?? ""),
+    ].join("\n"),
     selected: merged,
     rendered,
   };

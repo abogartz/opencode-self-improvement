@@ -28,7 +28,7 @@
 // Math.random; RESULTS.md carries no wall-clock stamp — `bun bench/inject-cost.ts`
 // is byte-identical across runs.
 //
-// Run: bun bench/inject-cost.ts   (also: bun run bench)
+// Run: bun bench/runners/inject-cost.ts   (also: bun run bench)
 import {
   mkdirSync,
   mkdtempSync,
@@ -50,10 +50,12 @@ delete process.env.OPENCODE_MEMORY_INJECT_BUDGET; // the bench measures the DEFA
 
 import { injectBudget } from "../../src/core/config/budgets.ts";
 import { compactionAnchor } from "../../src/inject/anchor.ts";
-import { capToBudget } from "../../src/inject/budget.ts";
 import { systemDigest } from "../../src/inject/digest.ts";
 import { storeVersion } from "../../src/inject/version.ts";
-import { relevantKnowledge } from "../../src/recall/relevant.ts";
+import {
+  relevantKnowledge,
+  selectRelevant,
+} from "../../src/recall/relevant.ts";
 import { loadAll } from "../../src/store/files/load.ts";
 import { type Memory } from "../../src/store/model/memory.ts";
 import { isActive } from "../../src/store/model/predicates.ts";
@@ -224,6 +226,21 @@ function seedStore(): void {
 
 const budget = injectBudget(); // 1200 (env cleared above)
 
+// The relevance block exactly as the SHIPPED path builds it: the budget is
+// applied to the priority order inside `selectRelevant` (#388), which then
+// renders the survivors in canonical order. Capping the rendered string with
+// capToBudget instead trims the canonical newest-first block, so recency decides
+// who rides — the behaviour #388 removes — and the B/C/D columns would stop
+// describing the code that ships. The shipped path also sets guidedCap and the
+// conflict check; the bench workload has no user-guided rows, so those stay off
+// and the budget is the only shared knob.
+const budgetedBlock = async (
+  prompt: string,
+  rows?: Memory[],
+): Promise<string> =>
+  (await selectRelevant(prompt, 5, rows, undefined, undefined, { budget }))
+    .block;
+
 // The standing digest + open-thread frontier, exactly as the context hook
 // renders it from the CURRENT store (or from the rows a caller supplies — the
 // #165 arm re-renders with the session's own additions taken back out).
@@ -294,8 +311,7 @@ for (let i = 0; i < prompts.length; i++) {
   if (w >= 0) applyWrite(w);
   const version = await storeVersion();
   if (!bEpoch || bEpoch.version !== version) {
-    const raw = await relevantKnowledge(prompts[i], 5);
-    bEpoch = { version, block: raw ? capToBudget(raw, budget) : "" };
+    bEpoch = { version, block: await budgetedBlock(prompts[i]) };
     bRecomputes++;
   }
   bSections.push(await section("ses-b", bEpoch.block, true));
@@ -313,11 +329,7 @@ for (let i = 0; i < prompts.length; i++) {
   if (w >= 0) applyWrite(w);
   const version = await storeVersion();
   if (!cEpoch || cEpoch.version !== version) {
-    const raw = await relevantKnowledge(prompts[i], 5);
-    const rendered = await section(
-      "ses-c",
-      raw ? capToBudget(raw, budget) : "",
-    );
+    const rendered = await section("ses-c", await budgetedBlock(prompts[i]));
     if (!cEpoch || cEpoch.section !== rendered) {
       cEpoch = { version, section: rendered };
       cRecomputes++;
@@ -354,10 +366,9 @@ for (let i = 0; i < prompts.length; i++) {
   const version = await storeVersion();
   if (!dEpoch || dEpoch.version !== version) {
     const rows = (await loadAll()).filter(isActive);
-    const raw = await relevantKnowledge(prompts[i], 5, rows);
     const rendered = await section(
       "ses-d",
-      raw ? capToBudget(raw, budget) : "",
+      await budgetedBlock(prompts[i], rows),
       false,
       rows,
     );
@@ -372,11 +383,10 @@ for (let i = 0; i < prompts.length; i++) {
         // the session's own additions, same prompt. A topic change is not a
         // content change: the epoch refuses to refresh for one anyway.
         const back = rows.filter((m) => !extra.some((e) => e.ts === m.ts));
-        const rawBack = await relevantKnowledge(frozen.prompt, 5, back);
         if (
           (await section(
             "ses-d",
-            rawBack ? capToBudget(rawBack, budget) : "",
+            await budgetedBlock(frozen.prompt, back),
             false,
             back,
           )) === frozen.section
@@ -427,12 +437,15 @@ const f1 = (n: number) => n.toFixed(1);
 
 const report = `# Injection cost — measured
 
-Reproduce with \`bun bench/inject-cost.ts\` (deterministic: fixed-seed LCG,
+Reproduce with \`bun bench/runners/inject-cost.ts\` (deterministic: fixed-seed LCG,
 synthetic timestamps, no wall clock in the output — reruns are byte-identical).
 The numbers come from the plugin's real injection code (\`src/inject.ts\`):
 a seeded store of ${memories.length} memories, a simulated session of
 ${prompts.length} user prompts with 3 mid-session store writes, and the default
-${budget}-character budget. Every column is measured on the FULL memory section
+${budget}-character budget. The relevance block is budgeted by priority inside
+the selector (\`selectRelevant\`, #388) and then rendered newest-first, so B/C/D
+measure the shipped budget path and not a trim of the rendered string. Every
+column is measured on the FULL memory section
 (digest + frontier + relevance block) — the bytes a request actually sends,
 because prompt caching is a property of those bytes and not of the block alone.
 

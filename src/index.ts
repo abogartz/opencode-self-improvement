@@ -8,6 +8,7 @@
 // src/command.ts. The default export `{ id, setup(ctx) }` is checked against
 // the SDK's Plugin type using a type-only import (see the note on `plugin`).
 import { registerHooks } from "./events.ts";
+import { forgetUsage } from "./identity/host-events.ts";
 import { guarded, setGuardedFailureReporter } from "./core/hooks.ts";
 import type { PluginCtx } from "./core/host.ts";
 import type { Cleanup, Plugin } from "@opencode/plugin/promise/plugin";
@@ -207,6 +208,7 @@ const impl = {
       // Code-check guided claims by default; explicit false opts out.
       contradictionSurface: ctx.options?.contradictionSurface !== false,
       measuredTurns,
+      forgetUsage,
       noteHits: (sid, rows, query) => noteHits("inject", sid, rows, query),
     });
     const flushStatus = sessions.flushStatus;

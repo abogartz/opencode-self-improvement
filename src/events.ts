@@ -15,6 +15,7 @@ import {
 import {
   sessionIdentityEvent,
   sessionUsageEvent,
+  foldUsage,
 } from "./identity/host-events.ts";
 import {
   afterTool,
@@ -262,14 +263,14 @@ export async function registerHooks(
           }
           const usage = sessionUsageEvent(raw);
           if (!usage) continue;
-          const { sessionID, input, read, write } = usage;
+          const { sessionID } = usage;
           sessions.touch(sessionID);
-          measuredTurns.set(sessionID, {
-            at: new Date().toISOString(),
-            input,
-            read,
-            write,
-          });
+          // #394 review: fold, do not overwrite — on the compatibility path a
+          // receipt is per-message, and the last message is not the session.
+          measuredTurns.set(
+            sessionID,
+            foldUsage(usage, new Date().toISOString()),
+          );
           await guarded("status flush (measured)", () =>
             flushStatus(sessionID),
           );

@@ -60,12 +60,30 @@ export interface Run {
   errors(): any[];
 }
 
+/** One provider response, as fake-model recorded it when it wrote the stream. */
+export interface ServedResponse {
+  /** Which scenario step the response came from (`"aux"` when none matched). */
+  served: string;
+  /** Last message text of the request this answered. */
+  prompt: string;
+  /** The final SSE chunk, exactly as sent. */
+  chunk: {
+    choices?: { finish_reason?: string | null }[];
+    usage?: {
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+    };
+  };
+}
+
 export interface Fake {
   port: number;
   dir: string;
   setSteps(steps: Record<string, unknown[]>): void;
   reset(): Promise<void>;
   requests(): Promise<any[]>;
+  served(): Promise<ServedResponse[]>;
   stop(): void;
 }
 
@@ -106,7 +124,17 @@ export async function startFake(): Promise<Fake> {
       (await (
         await fetch(`http://127.0.0.1:${port}/__requests`)
       ).json()) as any[],
-    stop: () => child.kill(),
+    served: async () =>
+      (await (
+        await fetch(`http://127.0.0.1:${port}/__served`)
+      ).json()) as ServedResponse[],
+    stop: () => {
+      child.kill();
+      // The dir holds only the port file, steps and the episode logs, and the
+      // child is the only thing that reads them: reap it with the process so a
+      // full e2e pass leaves no `psi-e2e-fake-*` behind in TMPDIR.
+      rmSync(dir, { recursive: true, force: true });
+    },
   };
 }
 
@@ -118,7 +146,11 @@ export interface Guest {
 }
 
 /** Fresh isolated instance dirs + project config pointing at `pluginPath`. */
-export function makeGuest(fake: Fake, pluginPath: string): Guest {
+export function makeGuest(
+  fake: Fake,
+  pluginPath: string,
+  extraPlugins: string[] = [],
+): Guest {
   const root = mkdtempSync(join(tmpdir(), "psi-e2e-"));
   const g = (n: string) => {
     mkdirSync(join(root, n), { recursive: true });
@@ -151,7 +183,10 @@ export function makeGuest(fake: Fake, pluginPath: string): Guest {
           },
         },
         model: "fake/scripted",
-        plugins: [{ package: pluginPath }],
+        plugins: [
+          { package: pluginPath },
+          ...extraPlugins.map((p) => ({ package: p })),
+        ],
       },
       null,
       2,

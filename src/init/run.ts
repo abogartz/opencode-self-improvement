@@ -1,18 +1,14 @@
 // run — split from src/init.ts (#168 domain restructure). Declaration bodies are unchanged.
 // Repository init: re-derive build/test command memories through the write gate
-// and store an init stamp keyed on git HEAD. Deterministic (no model calls):
+// and record an init stamp keyed on git HEAD. Deterministic (no model calls):
 // manifests are parsed locally and every write goes through the 4-gate pipeline
 // with the `trusted` flag (plugin-authored bookkeeping, not model claims).
 // Degrades gracefully when git is absent, so install-from-scratch still writes
 // script memories. The codebase-memory graph integration was removed (#231).
+// The stamp is a file under the memory root, not a memory row (#374): see
+// src/init/stamp.ts for why a row was forgeable.
 import { basename } from "node:path";
-import { loadAll } from "../store/files/load.ts";
-import { markSuperseded } from "../store/files/supersede.ts";
-import {
-  isVisibleTo,
-  readerFromSid,
-  type Reader,
-} from "../store/model/visibility.ts";
+import { readerFromSid } from "../store/model/visibility.ts";
 import { runWriteGate, type GateContext } from "../gate/gate.ts";
 import { captureEvidenceContext, record } from "../evidence/record.ts";
 import { writeEvidence, hasGateCheck } from "../capture/triggers.ts";
@@ -25,6 +21,8 @@ import {
   gitHead,
   gitRootOf,
 } from "./detect.ts";
+import { type RetagResult, retagQuarantinedRows } from "./retag.ts";
+import { readStamp, writeStampFile } from "./stamp.ts";
 
 export interface InitArgs {
   liveRoot: string;
@@ -47,33 +45,18 @@ export interface InitSummary {
   blocked: number;
   /** Written rows whose write_promoted audit line fell (#155 review). */
   unaudited?: number;
-}
-
-export interface InitStamp {
-  ts: string;
-  head: string;
-}
-
-export async function initStamp(
-  scope: string,
-  sid?: string,
-  reader: Reader = readerFromSid(sid),
-): Promise<InitStamp | null> {
-  // Scope is a basename, so two different repos can share one
-  // ("api" next to "api", a fork beside its upstream). Visibility filtering
-  // makes each repo see only its own stamp — basename collisions no longer
-  // alias init state between repos. The reader comes from the CALLER's
-  // session, not from the global current after this await (#127).
-  const mems = (await loadAll()).filter(
-    (m) => !m.superseded_by && isVisibleTo(m, reader),
-  );
-  for (const m of mems) {
-    if (m.type !== "context" || m.scope !== scope) continue;
-    if (!m.tags?.some((t) => t === "init-stamp")) continue;
-    const head = /head=([^ ,]+)/.exec(m.content)?.[1] ?? "-";
-    return { ts: m.ts, head };
-  }
-  return null;
+  /** The stamp file could not be written; init must be re-run (#374). */
+  stampError?: string;
+  /** True when a pre-#374 store row was honoured and copied to the file. */
+  stampMigrated?: boolean;
+  /**
+   * A honoured pre-#374 row is still active: its retirement did not land
+   * (#376 review). The migration itself is durable; the row is inert either
+   * way, and the operator hears about it instead of reading a clean migration.
+   */
+  stampRetireError?: string;
+  /** Pre-#372 rows re-tagged by the injection screen (#375). */
+  retag?: RetagResult;
 }
 
 export async function runInit(args: InitArgs): Promise<InitSummary> {
@@ -98,11 +81,43 @@ export async function runInit(args: InitArgs): Promise<InitSummary> {
     trusted: true,
   };
 
-  const prior = await initStamp(scope, args.sessionID, reader);
+  // #375: repair rows written before #372 screened init's output. This runs
+  // BEFORE the stamp check on purpose — the common poisoned store belongs to a
+  // repository init has already stamped, and returning early would leave the
+  // poisoned row live forever. The scan is one store read and five regexes per
+  // row; writes happen only on a hit.
+  const retag = await retagQuarantinedRows(gateCtx);
+
+  // The stamp is read from (and written to) a file named for the repository
+  // identity key, never from a row a model could write (#374). The write target
+  // already holds that identity, so the common path spends no git probes here.
+  // Scope is still a basename, so two "api" checkouts stay apart: the key, not
+  // the name, decides which stamp a repository reads.
+  const stampKeyHint = writeAt.ok ? writeAt.scope?.key : undefined;
+  const {
+    stamp: prior,
+    key: stampKey,
+    migrated,
+    stampError: migrateStampError,
+    retireError,
+  } = await readStamp(scope, root, stampKeyHint, args.sessionID, reader);
   if (prior && !force && prior.head === head) {
     await record(
       "init_skip",
-      { scope, head, since: prior.ts },
+      {
+        scope,
+        head,
+        since: prior.ts,
+        migrated: migrated || undefined,
+        // #376 review: a migration that honoured the row but could not write the
+        // file, or could not retire it, is a fault the skip line has to carry.
+        // Without it every later init re-migrates and re-claims success with no
+        // audit trail saying the file was never there.
+        stamp_error: migrateStampError,
+        stamp_retire_error: retireError,
+        retagged: retag.retagged || undefined,
+        retag_blocked: retag.blocked || undefined,
+      },
       false,
       args.sessionID,
       evidenceContext,
@@ -117,6 +132,10 @@ export async function runInit(args: InitArgs): Promise<InitSummary> {
       written: 0,
       collapsed: 0,
       blocked: 0,
+      stampError: migrateStampError,
+      stampMigrated: migrated || undefined,
+      stampRetireError: retireError,
+      retag,
     };
   }
 
@@ -159,31 +178,12 @@ export async function runInit(args: InitArgs): Promise<InitSummary> {
     else blocked++;
   }
 
-  const stampContent = `Init stamp: repo=${scope}, head=${head}, scripts=${scripts.length}`;
-  const stampOutcome = await runWriteGate(
-    // Same screen as the script rows: the stamp interpolates the directory
-    // basename, so an injection-shaped checkout name matches here too. Withheld
-    // from recall, still readable by initStamp(), so idempotency is unaffected.
-    quarantineCandidate({
-      type: "context",
-      scope,
-      content: stampContent,
-      tags: ["init-stamp"],
-    }),
-    gateCtx,
-  );
-  const stampTs = stampOutcome.ts ?? prior?.ts;
-  if (stampOutcome.action === "promoted" && prior && stampOutcome.ts) {
-    await markSuperseded(prior.ts, {
-      superseded_by: stampOutcome.ts,
-      reason: "init",
-    });
-  }
-  if (
-    stampOutcome.action === "promoted" &&
-    stampOutcome.evidenceError !== undefined
-  )
-    unaudited++;
+  // The stamp is bookkeeping about this run, not a claim for the model to read,
+  // so it is a file rather than a gated row (#374). A fault is reported, never
+  // swallowed: the honest consequence is "init will run again", and saying so
+  // beats a stamp the operator believes was written.
+  const stampTs = new Date().toISOString();
+  const stampError = writeStampFile(stampKey, scope, root, head, stampTs);
 
   await record(
     "init_complete",
@@ -196,7 +196,21 @@ export async function runInit(args: InitArgs): Promise<InitSummary> {
       collapsed,
       blocked,
       unaudited,
-      stamp: stampTs ?? "-",
+      stamp: stampError ? "-" : stampTs,
+      stamp_error: stampError,
+      // A migration that copied the row but could not retire it (#376 review).
+      stamp_retire_error: retireError,
+      migrated: migrated || undefined,
+      retagged: retag.retagged || undefined,
+      retag_blocked: retag.blocked || undefined,
+      retag_partial: retag.partial || undefined,
+      retag_failures: retag.failures.length
+        ? retag.failures.join("; ")
+        : undefined,
+      retag_remaining: retag.remaining || undefined,
+      retag_collateral: retag.collateral.length
+        ? retag.collateral.join(",")
+        : undefined,
     },
     false,
     args.sessionID,
@@ -208,11 +222,15 @@ export async function runInit(args: InitArgs): Promise<InitSummary> {
     root,
     head,
     scripts,
-    stampTs,
+    stampTs: stampError ? (prior?.ts ?? undefined) : stampTs,
+    stampError,
+    stampMigrated: migrated || undefined,
+    stampRetireError: retireError,
     skipped: false,
     written,
     collapsed,
     blocked,
     unaudited,
+    retag,
   };
 }

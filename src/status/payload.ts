@@ -16,7 +16,12 @@
 import { preparePrivateFile } from "../core/permissions.ts";
 import { readFile } from "node:fs/promises";
 import type { Attribution } from "../inject/attribution.ts";
-import { captureLag, ledgerIsYoung, rowsPerDay } from "./metrics.ts";
+import {
+  captureLag,
+  type CaptureCost,
+  ledgerIsYoung,
+  rowsPerDay,
+} from "./metrics.ts";
 
 export interface StoreCounts {
   active: number;
@@ -44,6 +49,12 @@ export interface StoreCounts {
   rowsPerDay?: number;
   /** Capture latency in ms, p50/p95, from `capture_lag` evidence. */
   captureLag?: { p50: number; p95: number; n: number };
+  /**
+   * What the plugin's own model calls cost (#387), from `capture_cost`
+   * evidence. An ESTIMATE: the host gives capture no receipt. Absent until
+   * evidence is read — a missing number, never a zero that reads as free.
+   */
+  captureCost?: CaptureCost;
 }
 
 /**
@@ -76,14 +87,28 @@ export function emptyStats(): SessionStats {
 /**
  * Measured prompt-cache usage from the last usage event — `session.usage.updated`
  * (v2 hosts) or `message.updated` assistant info (older hosts) — carrying tokens
- * {input, cache.read, cache.write}. This is the SESSION-WIDE prompt cache — the
- * honest receipt for "are we busting cache", never billed as our block's own rate.
+ * {input, output, reasoning, cache.read/write}. This is the SESSION-WIDE prompt
+ * cache — the honest receipt for "are we busting cache", never billed as our
+ * block's own rate. Cumulative, not a per-message snapshot: the final streaming
+ * update carries the whole session (see the note in src/events.ts).
  */
 export interface Measured {
   at: string;
   input: number;
   read: number;
   write: number;
+  /**
+   * Completion tokens for the session (#387): what the model produced, split
+   * so a reasoning-heavy seat is visible as one. `input` alone is only the
+   * uncached remainder, so quoting it as "what the session cost" understates
+   * it by most of its size — measured 13,393 reported against 187,856 moved.
+   *
+   * Optional on PURPOSE: this object is a persisted file read by a newer TUI
+   * than wrote it, and a host may omit the fields too. Absent means "not
+   * reported", which the surfaces render as nothing — never as 0.
+   */
+  output?: number;
+  reasoning?: number;
 }
 
 export interface StatusPayload {

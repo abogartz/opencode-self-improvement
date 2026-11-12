@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   captureSessionID,
+  foldUsage,
+  forgetUsage,
   sessionDirectoryFromMessages,
   sessionDirectoryFromRow,
   sessionIdentityEvent,
@@ -182,7 +184,12 @@ describe("host compatibility adapters", () => {
   const info = {
     role: "assistant",
     sessionID: "s",
-    tokens: { input: 10, cache: { read: 20, write: 30 } },
+    tokens: {
+      input: 10,
+      output: 40,
+      reasoning: 50,
+      cache: { read: 20, write: 30 },
+    },
   };
   test.each([
     ["V2 usage", { type: "session.usage.updated", data: info }],
@@ -193,12 +200,109 @@ describe("host compatibility adapters", () => {
     ["legacy info", { type: "message.updated", info }],
     ["legacy data.info", { type: "message.updated", data: { info } }],
   ])("usage envelope: %s", (_name, event) => {
-    expect(sessionUsageEvent(event)).toEqual({
+    expect(sessionUsageEvent(event)).toMatchObject({
       sessionID: "s",
       input: 10,
       read: 20,
       write: 30,
+      output: 40,
+      reasoning: 50,
     });
+  });
+
+  test("#394 review: the two sources are told apart — cumulative replaces, message receipts sum", () => {
+    // The finding: with message-1 usage 50 answer + 20 reasoning and
+    // message-2 usage 60 + 30, the old overwrite rendered 90 "session-wide"
+    // although the session produced 160.
+    const msg = (id: string, output: number, reasoning: number) =>
+      sessionUsageEvent({
+        type: "message.updated",
+        properties: {
+          info: {
+            id,
+            role: "assistant",
+            sessionID: "s",
+            tokens: {
+              input: 1,
+              output,
+              reasoning,
+              cache: { read: 0, write: 0 },
+            },
+          },
+        },
+      })!;
+    // Streaming: repeated updates for the SAME message overwrite each other.
+    foldUsage(msg("m1", 40, 15), "2026-11-11T00:00:00.000Z");
+    const afterM1 = foldUsage(msg("m1", 50, 20), "2026-11-11T00:00:01.000Z");
+    expect(afterM1.output).toBe(50);
+    expect(afterM1.reasoning).toBe(20);
+    // A second message ADDS: 50+20 and 60+30 = 160, not 90.
+    const both = foldUsage(msg("m2", 60, 30), "2026-11-11T00:00:02.000Z");
+    expect((both.output ?? 0) + (both.reasoning ?? 0)).toBe(160);
+    // A cumulative source replaces the total outright.
+    const cum = foldUsage(
+      sessionUsageEvent({
+        type: "session.usage.updated",
+        data: {
+          sessionID: "s",
+          tokens: { input: 7, output: 8, reasoning: 9, cache: {} },
+        },
+      })!,
+      "2026-11-11T00:00:03.000Z",
+    );
+    expect(cum.output).toBe(8);
+    expect(cum.reasoning).toBe(9);
+    // Eviction clears the per-message ledger: after forgetUsage the next
+    // message receipt stands alone, not added to ghosts of the old session.
+    forgetUsage("s");
+    const fresh = foldUsage(msg("m3", 5, 5), "2026-11-11T00:00:04.000Z");
+    expect((fresh.output ?? 0) + (fresh.reasoning ?? 0)).toBe(10);
+  });
+
+  test("#387: completion tokens are read, and an older host yields 0 rather than undefined", () => {
+    expect(
+      sessionUsageEvent({ type: "session.usage.updated", data: info }),
+    ).toMatchObject({
+      output: 40,
+      reasoning: 50,
+    });
+    // A host that reports no completion tokens must not produce a surface that
+    // claims the session generated nothing: 0 here, and the status renderer
+    // gates its generation line on a nonzero instead of printing it.
+    const thin = {
+      role: "assistant",
+      sessionID: "s",
+      tokens: { input: 10, cache: { read: 20, write: 30 } },
+    };
+    expect(
+      sessionUsageEvent({ type: "session.usage.updated", data: thin }),
+    ).toEqual({
+      sessionID: "s",
+      cumulative: true,
+      input: 10,
+      read: 20,
+      write: 30,
+      output: 0,
+      reasoning: 0,
+    });
+    // Reasoning is where a local seat's cost actually goes (measured: 94% of a
+    // capture call's completion tokens), so it must not be folded into output.
+    const split = {
+      role: "assistant",
+      sessionID: "s",
+      tokens: {
+        input: 1,
+        output: 7,
+        reasoning: 2277,
+        cache: { read: 0, write: 0 },
+      },
+    };
+    const got = sessionUsageEvent({
+      type: "session.usage.updated",
+      data: split,
+    });
+    expect(got?.output).toBe(7);
+    expect(got?.reasoning).toBe(2277);
   });
 
   test("legacy usage keeps envelope priority and ignores non-assistant messages", () => {
@@ -210,14 +314,28 @@ describe("host compatibility adapters", () => {
         info: other,
         data: { info: other },
       }),
-    ).toEqual({ sessionID: "s", input: 10, read: 20, write: 30 });
+    ).toEqual({
+      sessionID: "s",
+      input: 10,
+      read: 20,
+      write: 30,
+      output: 40,
+      reasoning: 50,
+    });
     expect(
       sessionUsageEvent({
         type: "message.updated",
         info,
         data: { info: other },
       }),
-    ).toEqual({ sessionID: "s", input: 10, read: 20, write: 30 });
+    ).toEqual({
+      sessionID: "s",
+      input: 10,
+      read: 20,
+      write: 30,
+      output: 40,
+      reasoning: 50,
+    });
     expect(
       sessionUsageEvent({
         type: "message.updated",
@@ -231,7 +349,14 @@ describe("host compatibility adapters", () => {
         properties: { info: null },
         info,
       }),
-    ).toEqual({ sessionID: "s", input: 10, read: 20, write: 30 });
+    ).toEqual({
+      sessionID: "s",
+      input: 10,
+      read: 20,
+      write: 30,
+      output: 40,
+      reasoning: 50,
+    });
   });
 
   test("missing usage is distinct from measured zero; numeric coercion stays compatible", () => {
@@ -252,16 +377,37 @@ describe("host compatibility adapters", () => {
         type: "session.usage.updated",
         data: { sessionID: "s", tokens: {} },
       }),
-    ).toEqual({ sessionID: "s", input: 0, read: 0, write: 0 });
+    ).toEqual({
+      sessionID: "s",
+      cumulative: true,
+      input: 0,
+      read: 0,
+      write: 0,
+      output: 0,
+      reasoning: 0,
+    });
     expect(
       sessionUsageEvent({
         type: "session.usage.updated",
         data: {
           sessionID: "s",
-          tokens: { input: "12", cache: { read: "bad", write: null } },
+          tokens: {
+            input: "12",
+            output: "9",
+            reasoning: "1.5e3",
+            cache: { read: "bad", write: null },
+          },
         },
       }),
-    ).toEqual({ sessionID: "s", input: 12, read: 0, write: 0 });
+    ).toEqual({
+      sessionID: "s",
+      cumulative: true,
+      input: 12,
+      read: 0,
+      write: 0,
+      output: 9,
+      reasoning: 1500,
+    });
   });
 
   test("capture session envelopes prefer data, then root, then properties", () => {

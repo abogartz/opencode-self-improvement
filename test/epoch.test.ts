@@ -232,6 +232,51 @@ describe("epoch freeze (cache-safe injection)", () => {
     expect(String(recomputes[1].reason)).toBe("prompt_reveal");
   });
 
+  // The same-order half of the #340 contract, stated with enough rows for an
+  // ORDER to exist — case 1 seeds a single row, so it cannot show one. Both
+  // prompts score the two rows identically, so the re-score renders the same
+  // bytes and the epoch adopts the new prompt without moving. This is the half
+  // that must survive #388's canonical render order; the order-sensitivity of
+  // the current rendering is deliberately NOT pinned here, because #388 exists
+  // to change it.
+  test("a prompt that re-selects the same rows in the same order costs ZERO cache busts", async () => {
+    seed(
+      "pattern",
+      "build",
+      "The webpack loader order matters: use the enforce pre hook.",
+      { ts: "2026-10-01T10:00:00.000Z" },
+    );
+    seed(
+      "pattern",
+      "build",
+      "The webpack loader cacheDirectory speeds up rebuilds.",
+      { ts: "2026-10-02T10:00:00.000Z" },
+    );
+    const loaded = await loadPlugin(liveRoot);
+
+    const first = await deliveredBlock(
+      loaded,
+      "ses-order",
+      "webpack loader order enforce pre hook",
+    );
+    expect(first).toContain("enforce pre hook");
+    expect(first).toContain("cacheDirectory");
+
+    // A different prompt that lands the same two rows in the same order: the
+    // rendered bytes do not move, so nothing is recorded.
+    expect(
+      await deliveredBlock(
+        loaded,
+        "ses-order",
+        "webpack loader enforce pre hook config",
+      ),
+    ).toBe(first);
+
+    const recomputes = epochRecomputes("ses-order");
+    expect(recomputes.length).toBe(1);
+    expect(String(recomputes[0].reason)).toBe("first");
+  });
+
   test("case 2: a new memory in the store invalidates the epoch and the block changes", async () => {
     seed("pattern", "build", "alpha builds run make all");
     const loaded = await loadPlugin(liveRoot);

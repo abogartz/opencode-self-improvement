@@ -109,6 +109,17 @@ export function windowLines(p: StatusPayload): string[] {
       "  of what you sent  not measured yet — receipts appear after the first assistant turn",
     );
   }
+  // #387: the completion side. Everything above counts the prompt only, and
+  // `input` is the UNCACHED remainder, so neither was ever "what the session
+  // cost" — the tokens the model produced were not reported at all. Rendered
+  // only when the host reports them: an absent number stays absent rather than
+  // showing 0, which reads as "generated nothing".
+  const gen = m ? (m.output ?? 0) + (m.reasoning ?? 0) : 0;
+  if (gen > 0) {
+    out.push(
+      `  what it produced  ${fmtCount(gen)} completion tok — ${fmtCount(m?.output ?? 0)} answer + ${fmtCount(m?.reasoning ?? 0)} reasoning (provider-reported, session-wide)`,
+    );
+  }
   const moved = p.stats?.invalidations ?? 0;
   out.push(
     `  epochs whose bytes moved  ${moved} this session${moved ? "" : " — memory-section bytes have not moved"}`,
@@ -282,6 +293,18 @@ export function renderMemoryReport(input: {
   if (store.captureLag && store.captureLag.n) {
     sizing.push(
       `capture lag p50 ${fmtMs(store.captureLag.p50)} / p95 ${fmtMs(store.captureLag.p95)}`,
+    );
+  }
+  // #387: capture is a separate model call outside every session's usage, so
+  // anything that reads session numbers reports it as free. Render it even at
+  // zero, with the reason, because "0" and "never ran" are different facts and
+  // the plugin billed it as the first for its whole history.
+  if (store.captureCost) {
+    const c = store.captureCost;
+    sizing.push(
+      c.calls
+        ? `capture ~${fmtCount(c.estTokens)} tok est. over ${c.calls} call${c.calls === 1 ? "" : "s"} (${fmtCount(c.promptChars)} in / ${fmtCount(c.textChars)} out, ${c.sessions} session${c.sessions === 1 ? "" : "s"}) — estimate, no provider receipt`
+        : "capture 0 tok — no capture call in the window",
     );
   }
   if (sizing.length) out.push(`  ${sizing.join(" · ")}`);

@@ -38,6 +38,8 @@ interface InjectionEpochOptions {
   // The host listener records usage. Eviction must still drop it with the
   // epoch and request counters, so no measurement outlives its tracked session.
   measuredTurns: Pick<Map<string, Measured>, "get" | "delete">;
+  /** Evict the per-message usage ledger (#394) with the session. */
+  forgetUsage?: (sid: string) => void;
   noteHits: (sid: string, rows: Memory[], query: string) => Promise<void>;
 }
 
@@ -46,6 +48,7 @@ export function createInjectionEpochs({
   frontierBudget: openBudget,
   contradictionSurface = true,
   measuredTurns,
+  forgetUsage,
   noteHits,
 }: InjectionEpochOptions) {
   // Per-session frozen injection epochs: the whole memory section (digest +
@@ -106,6 +109,7 @@ export function createInjectionEpochs({
     latestPrompt.delete(sid);
     sessionStats.delete(sid);
     measuredTurns.delete(sid);
+    forgetUsage?.(sid);
   });
   const statsFor = (sid: string): SessionStats => {
     let st = sessionStats.get(sid);
@@ -203,6 +207,11 @@ export function createInjectionEpochs({
       undefined,
       {
         guidedCap: 3,
+        // #388: budget the RIDING set by priority here, before the block is
+        // rendered in canonical order. Capping the rendered string (the old
+        // path) made recency decide who got dropped, because the newest row is
+        // now always first.
+        budget,
         ...(contradictionSurface
           ? {
               conflictCheck: true,
@@ -211,6 +220,14 @@ export function createInjectionEpochs({
           : {}),
       },
     );
+    // UNREACHABLE today, not a guard: `selectRelevant` was handed the same
+    // `budget` and builds the block as header + Σ(1 + line) over lines it
+    // accepted while that running sum stayed ≤ budget, and every line length is
+    // non-negative. So a non-empty `sel.block` is already ≤ budget, capToBudget
+    // keeps every line, and this call returns its argument unchanged. No test
+    // can reach a different result; it stays only as a byte bound on the text
+    // that rides the prompt if a future caller stops budgeting inside the
+    // selector.
     const block = sel.block ? capToBudget(sel.block, budget) : "";
     // Refs the ACTUALLY-injected rows assert (paths + commands), the join key
     // for attribution. Derived from the budget-surviving rows, not the wider
@@ -328,7 +345,8 @@ export function createInjectionEpochs({
         // Hint-channel attribution (mystery 2): a wire miss is one grep away.
         // guidedSeen=0 -> capture never wrote the row. guidedSeen>0 with the
         // id absent from `guided` -> the cap (newest-first, 3) dropped it.
-        // In `guided` but absent from `guidedRode` -> capToBudget dropped it.
+        // In `guided` but absent from `guidedRode` -> the budget inside
+        // selectRelevant dropped it (#388 moved the cap there from capToBudget).
         // In `guidedRode` yet absent from the wire -> render/transport, or a
         // paraphrased needle (now impossible for rows carrying `orig=true`).
         ...(built.guidedSeen ? { guidedSeen: built.guidedSeen } : {}),

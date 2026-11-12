@@ -11,9 +11,13 @@
 // Control endpoints for the harness:
 //   GET  /healthz      -> "ok"
 //   GET  /__requests   -> array of logged request bodies for this episode
-//   POST /__reset      -> zero per-marker counters, truncate the episode log
+//   GET  /__served     -> array of { served, prompt, chunk } for this episode:
+//                         the LAST chunk written for each response, recorded
+//                         from the object that was actually sent
+//   POST /__reset      -> zero per-marker counters, truncate the episode logs
 import {
   appendFile,
+  appendFileSync,
   existsSync,
   readFileSync,
   truncateSync,
@@ -24,6 +28,7 @@ const dir = process.env.SMOKE_DIR;
 if (!dir) throw new Error("SMOKE_DIR is required");
 const stepsFile = `${dir}/steps.json`;
 const logFile = `${dir}/requests.jsonl`;
+const servedFile = `${dir}/served.jsonl`;
 const port = Number(process.env.FAKE_PORT ?? 0);
 
 const counters: Record<string, number> = {};
@@ -66,25 +71,64 @@ function stepFor(body: any): { step: any; served: string } {
   return { step: arr[Math.min(n, arr.length - 1)], served: `${marker}[${n}]` };
 }
 
+/** Last message text of a request body — enough to pair a served response
+ * back with the call that asked for it. */
+function lastPrompt(body: { messages?: { content?: unknown }[] }): string {
+  const msgs = body.messages ?? [];
+  return String(msgs[msgs.length - 1]?.content ?? "");
+}
+
+/**
+ * The closing chunk of every response. #395 characterization: a real
+ * openai-compatible provider reports `usage` here, so the fake does too —
+ * whether those numbers reach a plugin is the host's contract, pinned by
+ * e2e/generate-receipt.test.ts.
+ */
+function finalChunk(
+  base: Record<string, unknown>,
+  step: { tool_calls?: unknown[] },
+) {
+  return {
+    ...base,
+    choices: [
+      {
+        index: 0,
+        delta: {},
+        finish_reason: step.tool_calls ? "tool_calls" : "stop",
+      },
+    ],
+    usage: {
+      prompt_tokens: 111,
+      completion_tokens: 22,
+      total_tokens: 133,
+    },
+  };
+}
+
+/** One JSON value per line; absent file reads as empty. */
+function readJsonl(file: string): unknown[] {
+  const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+  return text
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => JSON.parse(l));
+}
+
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port,
   async fetch(req) {
     const url = new URL(req.url);
     if (url.pathname === "/healthz") return new Response("ok");
-    if (url.pathname === "/__requests") {
-      const text = existsSync(logFile) ? readFileSync(logFile, "utf8") : "";
-      return Response.json(
-        text
-          .trim()
-          .split("\n")
-          .filter(Boolean)
-          .map((l) => JSON.parse(l)),
-      );
-    }
+    if (url.pathname === "/__requests")
+      return Response.json(readJsonl(logFile));
+    if (url.pathname === "/__served")
+      return Response.json(readJsonl(servedFile));
     if (url.pathname === "/__reset" && req.method === "POST") {
       for (const k of Object.keys(counters)) delete counters[k];
       if (existsSync(logFile)) truncateSync(logFile, 0);
+      if (existsSync(servedFile)) truncateSync(servedFile, 0);
       return new Response("ok");
     }
     if (url.pathname.endsWith("/chat/completions") && req.method === "POST") {
@@ -105,19 +149,25 @@ const server = Bun.serve({
           index: n,
           ...tc,
         }));
-      return sse([
-        { ...base, choices: [{ index: 0, delta, finish_reason: null }] },
-        {
-          ...base,
-          choices: [
-            {
-              index: 0,
-              delta: {},
-              finish_reason: step.tool_calls ? "tool_calls" : "stop",
-            },
-          ],
-        },
-      ]);
+      const first = {
+        ...base,
+        choices: [{ index: 0, delta, finish_reason: null }],
+      };
+      const final = finalChunk(base, step);
+      // The provider side of the #395 premise, recorded from the object that
+      // was actually written rather than restated: delete `usage` from
+      // finalChunk() above and this log records a chunk without it, which is
+      // what turns e2e/generate-receipt.test.ts red instead of leaving it to
+      // pin a provider that no longer reports anything.
+      appendFileSync(
+        servedFile,
+        `${JSON.stringify({
+          served,
+          prompt: lastPrompt(body),
+          chunk: final,
+        })}\n`,
+      );
+      return sse([first, final]);
     }
     return new Response("not found", { status: 404 });
   },

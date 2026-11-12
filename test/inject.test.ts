@@ -196,9 +196,14 @@ describe("relevantKnowledge (memory-first injection)", () => {
       seed("learning", "build", `build output artifact pack step ${i}`);
     seed("learning", "ui", "build output toggle default off");
     seed("learning", "db", "build salt rotation rule");
-    const block = await relevantKnowledge("the build output salt");
-    const lines = block.split("\n").filter((l) => l.startsWith("- ["));
-    expect(lines[0]).toContain("salt");
+    // The rank is asserted on `selected`, not on the block. #388 renders the
+    // block in canonical order, so the bytes never carry score order; this
+    // assertion used to pass on the block only because every seeded row landed
+    // in the same millisecond and the sort was stable — an accident, not a
+    // contract. `selected` is the documented home of the ranking.
+    const { block, selected } = await selectRelevant("the build output salt");
+    expect(selected[0]?.content).toContain("salt");
+    expect(block).toContain("salt");
   });
 });
 
