@@ -24,7 +24,7 @@
 
 Arms in every column: off / tag / drop-at-read / delete-hardened / delete-original. The guided row is exempt from the demotion by design and rode 21/21 blocks at the loosest budget; the exemption control below measures it from the first budget that can physically hold the line, because at 15% the header plus the guided row exceeds the budget in every arm and that is arithmetic, not policy.
 
-**Ceiling.** 14 of 21 transport queries retrieve their own gold when that gold is the ONLY row in the store, and 6 of 6 doc queries do. Every recall figure above is out of those ceilings, not out of 21: the best arm reaches 9/14 retrievable, which is a different claim from 9/21. 7 curated pairs never retrieve their gold even with no competition at all (m01, m02, m04, m07, m08, m12, m14); that is a scorer/dataset finding, reported here and not this bench's to fix.
+**Ceiling.** 9 of 21 transport queries retrieve their own gold when that gold is the ONLY row in the store, measured on the exact captured rows the arms retrieve; 6 of 6 doc queries do. Every recall figure above is out of those, not out of 21 — the best arm reaches 9/9, which is at the achievable ceiling. A SECOND ceiling is reported because the two are not the same number: give the same golds the dataset's authored keywords and 14/21 retrieve, because 5 of the 12 blind queries turn retrievable on keywords alone. The captured rows carry none (0 of 16), because the scripted capture reply emits none — a property of this fixture, stated rather than assumed. m01, m02, m04, m05, m07, m08, m10, m11, m12, m14 are unretrievable on the rows the arms hold, and m01, m02, m04, m07, m08, m12, m14 of them stay unretrievable even with authored keywords — those are the scorer/dataset finding (#405), reported here and not this bench's to fix.
 
 
 **Cost.** The tag arm answers 0,0,0,0,6 of 6 queries about facts the README also states, where the no-check arm answers 5,6,6,6,6. It gives up those slots at 15%, 25%, 40%, 60% budget — the demotion working as designed, because the tree has the fact, and a real loss all the same. At 85% the budget holds everything and the two arms agree.
@@ -44,7 +44,7 @@ Same 16 captured rows, background resampled at 0/30/90/180 rows; budget recomput
 
 ## Case bank: every adversarial verdict, re-decided
 
-23 (tree, candidate) pairs, one repo each, decided by the shipped availabilityIndex. 7 must tag, 16 must not.
+25 (tree, candidate) pairs, one repo each, decided by the shipped availabilityIndex. 8 must tag, 17 must not.
 
 | case | expect | got | found by |
 | --- | --- | --- | --- |
@@ -60,16 +60,18 @@ Same 16 captured rows, background resampled at 0/30/90/180 rows; budget recomput
 | deterrent-verb-not-governing | tag | in_tracked_file | #403 self-review — the veto's own over-decline, caught by this case |
 | ordinary-verb-not-a-deterrent | tag | in_tracked_file | #403 self-review — `drops` governs `stale entries`, not a following claim |
 | new-clause-rides-restatement | keep | keep | #397 review — matching PART of a candidate does not establish the WHOLE fact |
-| new-number-on-declared-command | keep | keep | #402 veto 2 — a changed figure is a different fact, not a rephrasing |
+| declared-command-restated | tag | declared_gate | #389 — the gate rule's true positive; #403 review 4 moved it onto a real declaration |
+| make-target-restated | tag | declared_gate | #403 review 4 — a second gate source, so the bank does not silently depend on package.json alone |
+| make-target-new-condition | keep | keep | #403 review 4 — the counterpart, and the case that was wrong when written: the target is declared, the WHEN is not |
+| declared-command-reworded-residual | keep | keep | #397 round 4 — the residual is checked too, and a reworded residual is kept |
+| declared-command-new-context | keep | keep | #397 round 2 — the manifest states the command, not when to use it |
+| prohibition-on-declared-command | keep | keep | #397 — a sentence that states a command may also forbid it |
 | restriction-on-declared-command | keep | keep | #397 round 3 — the restriction and the code appear nowhere |
 | short-restriction-on-declared-command | keep | keep | #397 round 2 — a short residual is not a restatement |
-| second-command-not-swallowed | keep | keep | #397 round 4 — every command span was stripped after ONE declared gate |
-| prohibition-on-declared-command | keep | keep | #397 — a sentence that states a command may also forbid it |
-| declared-command-restated | tag | in_tracked_file | #389 — the declared-gate rule's true positive, backticks aside |
-| declared-command-reworded-residual | keep | keep | #397 round 4 — the residual is checked too, and a reworded residual is kept |
-| prose-command-not-a-code-span | keep | keep | self-review of the case bank — the command check reads code spans only, so a prose command is not a match; recorded as a limit, not fixed |
+| second-command-not-swallowed | keep | keep | #397 round 2 — the second command is new information |
+| new-number-on-declared-command | keep | keep | #402 veto 2 — a changed figure is a different fact, not a rephrasing |
+| prose-command-not-a-code-span | keep | keep | self-review of the case bank — `statedCommands` reads code spans only, so a prose command never reaches the gate; recorded as a limit, not fixed |
 | prose-restatement-still-tags | tag | in_tracked_file | self-review of the case bank — the counterpart to the prose-command limit above |
-| declared-command-new-context | keep | keep | #397 round 2 — the manifest states the command, not when to use it |
 | gate-name-in-prose | keep | keep | #397 review — a short gate name does not tag prose that merely contains it |
 
 
@@ -98,17 +100,19 @@ The tag claims the tracked tree already states the fact, so emptying the tree mu
 - PASS — conservation: all 16 scripted candidates reached the store, RED with the lost prose named so the gate reason can be read off the trail
 - PASS — the baseline is the historical rule, not a stand-in: the pinned 362655c module refuses 10 of 16 captured rows, including every documented fact and all 4 command-stating ones — RED if the vendored module drifts or a hand-written approximation creeps back
 - PASS — the bench can measure a loss: delete-original keeps 6/10 transport facts, the rest deleted before the write
-- PASS — WIN vs the original rule: tag delivers 9/14 retrievable transport facts (21 asked) at the binding budget, delete-original 5, and tag is never behind at any budget (7,8,9,9,9 vs 4,4,5,5,5) — a deleted fact cannot be retrieved
+- PASS — WIN vs the original rule: tag delivers 9/9 retrievable transport facts (21 asked) at the binding budget, delete-original 5, and tag is never behind at any budget (7,8,9,9,9 vs 4,4,5,5,5) — a deleted fact cannot be retrieved
 - PASS — the demotion costs no recall: tag is at or above the no-check arm on transport facts at all 5 budgets (7,8,9,9,9 vs 6,8,9,9,9)
 - PASS — WIN vs no check at all, stated honestly: the tag arm never spends MORE block bytes on facts the tree already states, at any budget, and spends fewer where the budget binds (20,41,41,48,54 vs 34,41,54,89,89)
 - PASS — deleting is not free: the tag arm keeps 6 captured restatable facts a budget can still surface; #397's policy keeps 0, unreachable at any budget
 - PASS — the guided lane is exempt: a guided AND restatable row still rides 21/21 blocks at every budget that can hold it (691, 1152, 1843, 2765, 3917 bytes)
 - PASS — one model call per pass whatever the policy — availability is decided after the call, so #389 AC4 cannot lower capture cost
 - PASS — prompt containment: every scripted fact really rode the capture prompt
-- PASS — the case bank can say both things: 23 cases, 7 must tag and 16 must not — RED if either polarity is emptied out
-- PASS — the shipped matcher still decides every adversarial case: 23/23 — RED with the case named, so the veto that moved is readable from its "found by" column
+- PASS — the case bank can say both things: 25 cases, 8 must tag and 17 must not — RED if either polarity is emptied out
+- PASS — the shipped matcher still decides every adversarial case: 25/25 — RED with the case named, so the veto that moved is readable from its "found by" column
+- PASS — every case that names a branch gets that branch: 3 branch-pinned cases, 0 answered by the other half — RED with the case named, because a gate case answered by prose tests nothing of the gate
+- PASS — the bank reaches both branches of the check: 2 declared_gate and 6 in_tracked_file verdicts — RED if either drops below 2, which is how a branch disappears while every verdict still looks right
 - PASS — a read-time drop removes exactly the restatable rows and nothing else: it keeps 10/10 transport facts and 191 of 197 rows — RED if a verdict is read from the wrong row, which is what a ts-keyed lookup does when a pass writes rows in one millisecond
-- PASS — the hit metric can score at all: 14/21 transport and 6/6 doc queries retrieve their own gold alone — unretrievable golds: m01, m02, m04, m07, m08, m12, m14 — RED if a family goes wholly blind, because a wholly blind family reports 0 in every arm and no other control would notice
+- PASS — the hit metric can score at all: 9/21 transport (exact captured rows) and 6/6 doc queries retrieve their own gold alone — unretrievable golds: m01, m02, m04, m05, m07, m08, m10, m11, m12, m14 — RED if a family goes wholly blind, because a wholly blind family reports 0 in every arm and no other control would notice
 - PASS — every marked row is supported by the tracked tree: 6 marked of 196 rows, 0 with no substantive word in common — RED if a row is marked on nothing, or if nothing is marked at all
 - PASS — the win is not an artefact of one store size: tag is at or above both delete-original and drop-at-read on transport facts at all 4 background sizes x 3 budgets (0:8/9/9 30:8/9/9 90:7/9/9 180:8/9/9)
 - PASS — the P3 preview does what it claims: drop-at-read spends 0 block bytes on facts the tree states at every budget — and the transport column is the price (7,8,9,9,9 vs tag 7,8,9,9,9)

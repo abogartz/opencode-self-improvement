@@ -455,13 +455,30 @@ try {
   // ── What can this harness score at all? ───────────────────────────────────
   // The negative direction of the hit metric is pinned by the header-only budget:
   // a hit can be missed. Nothing pinned that one can be FOUND, and the gap is not
-  // hypothetical — written without keyword sets, 12 of the 21 transport queries
-  // scored 0 against their own gold ALONE in an empty store. Seven still do with
-  // keywords present. Those queries report 0 in every arm at every budget, so
-  // every recall figure below is out of what is retrievable, not out of 21, and
-  // the ceiling is measured here rather than assumed by the reader.
+  // hypothetical — 12 of the 21 transport queries score 0 against their own gold
+  // ALONE in an empty store.
+  //
+  // Two ceilings, because review round 4 (WhollyMindless) showed they are not the
+  // same number. The ceiling that matters for every figure in this report is
+  // measured on the EXACT rows the arms retrieve: the captured rows, which carry no
+  // keywords at all (the scripted capture reply emits none, counted below). The
+  // other ceiling adds the dataset's authored `kw`, and adding it turns 5 of the 12
+  // blind queries around — so a ceiling taken from kw-bearing rows is not the
+  // ceiling of these arms, and "9/14" would mix a numerator from one representation
+  // with a ceiling from another.
   const storeRows = new Map(buildStore(600).map((s) => [s.id, s]));
-  const solo = (content: string, i: number, kwId?: string): Memory =>
+  const capturedWithKw = stored.filter((m) => (m.kw?.length ?? 0) > 0).length;
+  /** The gold as the ARMS hold it: the captured row, nothing added. */
+  const exactRowFor = (goldId: string): Memory | undefined => {
+    const gold = withCommand(byId.get(goldId)!.content);
+    return stored.find((m) => m.content.includes(gold.slice(0, 60)));
+  };
+  const solo = (
+    content: string,
+    i: number,
+    kwId?: string,
+    extra?: Partial<Memory>,
+  ): Memory =>
     ({
       ts: `2026-01-03T00:00:${String(i % 60).padStart(2, "0")}.000Z`,
       type: "learning",
@@ -469,20 +486,56 @@ try {
       content,
       status: "settled",
       ...(kwId ? { kw: storeRows.get(kwId)?.kw } : {}),
+      ...extra,
     }) as unknown as Memory;
-  const blindTransport: string[] = [];
-  for (const [i, q] of transportQueries.entries()) {
-    const gold = withCommand(byId.get(q.gold)!.content);
-    const { block } = await selectRelevant(
-      q.q,
-      30,
-      [solo(gold, i, q.gold)],
-      undefined,
-      undefined,
-      { budget: 100_000, guidedCap: 3 },
-    );
-    if (!block.includes(gold.slice(0, 60))) blindTransport.push(q.gold);
+
+  /** Queries whose gold is never retrieved, given a row-builder. */
+  async function blindAgainst(
+    build: (
+      q: (typeof transportQueries)[number],
+      i: number,
+    ) => Memory | undefined,
+    probe: (q: (typeof transportQueries)[number], row: Memory) => string,
+  ): Promise<string[]> {
+    const blind: string[] = [];
+    for (const [i, q] of transportQueries.entries()) {
+      const row = build(q, i);
+      if (!row) {
+        blind.push(`${q.gold}?`);
+        continue;
+      }
+      const { block } = await selectRelevant(
+        q.q,
+        30,
+        [row],
+        undefined,
+        undefined,
+        { budget: 100_000, guidedCap: 3 },
+      );
+      if (!block.includes(probe(q, row))) blind.push(q.gold);
+    }
+    return blind;
   }
+
+  const goldOf = (q: (typeof transportQueries)[number]) =>
+    withCommand(byId.get(q.gold)!.content);
+  const blindExact = await blindAgainst(
+    (q, i) => {
+      const row = exactRowFor(q.gold);
+      return (
+        row &&
+        ({
+          ...row,
+          ts: `2026-01-03T11:00:${String(i % 60).padStart(2, "0")}.000Z`,
+        } as Memory)
+      );
+    },
+    (q) => goldOf(q).slice(0, 60),
+  );
+  const blindAuthoredKw = await blindAgainst(
+    (q, i) => solo(goldOf(q), i, q.gold),
+    (q) => goldOf(q).slice(0, 60),
+  );
   const blindDoc: string[] = [];
   for (const [i, q] of documentedQueries.entries()) {
     const { block } = await selectRelevant(
@@ -496,7 +549,8 @@ try {
     if (!block.includes(q.content.slice(0, 60)))
       blindDoc.push(q.content.slice(0, 34));
   }
-  const ceilingT = transportQueries.length - blindTransport.length;
+  const ceilingT = transportQueries.length - blindExact.length;
+  const ceilingKw = transportQueries.length - blindAuthoredKw.length;
   const ceilingD = documentedQueries.length - blindDoc.length;
 
   const unlimited = await selectRelevant(
@@ -657,13 +711,19 @@ try {
   lines.push("");
   lines.push(
     `**Ceiling.** ${ceilingT} of ${transportQueries.length} transport queries retrieve their own gold ` +
-      `when that gold is the ONLY row in the store, and ${ceilingD} of ${documentedQueries.length} doc ` +
-      `queries do. Every recall figure above is out of those ceilings, not out of ` +
-      `${transportQueries.length}: the best arm reaches ${Math.max(...names.map((n) => cell(n, FRACS[FRACS.length - 1]!).transportHits))}/${ceilingT} ` +
-      `retrievable, which is a different claim from ${Math.max(...names.map((n) => cell(n, FRACS[FRACS.length - 1]!).transportHits))}/${transportQueries.length}. ` +
-      `${blindTransport.length} curated pairs never retrieve their gold even with no competition at all ` +
-      `(${[...new Set(blindTransport)].join(", ")}); that is a scorer/dataset finding, reported here and ` +
-      `not this bench's to fix.`,
+      `when that gold is the ONLY row in the store, measured on the exact captured rows the arms ` +
+      `retrieve; ${ceilingD} of ${documentedQueries.length} doc queries do. Every recall figure above is ` +
+      `out of those, not out of ${transportQueries.length} — the best arm reaches ` +
+      `${Math.max(...names.map((n) => cell(n, FRACS[FRACS.length - 1]!).transportHits))}/${ceilingT}, ` +
+      `which is ${Math.max(...names.map((n) => cell(n, FRACS[FRACS.length - 1]!).transportHits)) === ceilingT ? "at the achievable ceiling" : "below it"}. ` +
+      `A SECOND ceiling is reported because the two are not the same number: give the same golds the ` +
+      `dataset's authored keywords and ${ceilingKw}/${transportQueries.length} retrieve, because ` +
+      `${ceilingKw - ceilingT} of the ${blindExact.length} blind queries turn retrievable on keywords ` +
+      `alone. The captured rows carry none (${capturedWithKw} of ${stored.length}), because the scripted ` +
+      `capture reply emits none — a property of this fixture, stated rather than assumed. ` +
+      `${[...new Set(blindExact)].join(", ")} are unretrievable on the rows the arms hold, and ` +
+      `${[...new Set(blindAuthoredKw)].join(", ")} of them stay unretrievable even with authored ` +
+      `keywords — those are the scorer/dataset finding (#405), reported here and not this bench's to fix.`,
   );
   lines.push("");
   // The cost, stated by the harness rather than left for the reader to find in
@@ -765,6 +825,13 @@ try {
   // flipped verdict changes the tag rate and therefore every number above.
   const bank = await runCaseBank(scratch);
   const bankBad = bank.filter((b) => b.got !== b.expectTag);
+  const bankWrongBranch = bank.filter(
+    (b) => b.expectReason && b.reason !== b.expectReason,
+  );
+  const gateVerdicts = bank.filter((b) => b.reason === "declared_gate").length;
+  const textVerdicts = bank.filter(
+    (b) => b.reason === "in_tracked_file",
+  ).length;
   lines.push("## Case bank: every adversarial verdict, re-decided");
   lines.push("");
   lines.push(
@@ -969,6 +1036,18 @@ try {
     bankBad.length === 0,
     `the shipped matcher still decides every adversarial case: ${bank.length - bankBad.length}/${bank.length}${bankBad.length ? ` — DRIFTED: ${bankBad.map((b) => `${b.id} expected ${b.expectTag ? "tag" : "keep"}, got ${b.got ? "tag" : "keep"}`).join(" | ")}` : ""} — RED with the case named, so the veto that moved is readable from its "found by" column`,
   );
+  // Review round 4: seven cases named for the declared-command branch were
+  // decided by README prose, so the branch could be deleted and the bank stayed
+  // green. Two halves: a case that says which branch must answer is checked
+  // against that branch, and the branch must be present in the population at all.
+  check(
+    bankWrongBranch.length === 0,
+    `every case that names a branch gets that branch: ${bank.filter((b) => b.expectReason).length} branch-pinned cases, ${bankWrongBranch.length} answered by the other half${bankWrongBranch.length ? ` — ${bankWrongBranch.map((b) => `${b.id} expected ${b.expectReason}, got ${b.reason || "none"}`).join(" | ")}` : ""} — RED with the case named, because a gate case answered by prose tests nothing of the gate`,
+  );
+  check(
+    gateVerdicts >= 2 && textVerdicts >= 2,
+    `the bank reaches both branches of the check: ${gateVerdicts} declared_gate and ${textVerdicts} in_tracked_file verdicts — RED if either drops below 2, which is how a branch disappears while every verdict still looks right`,
+  );
   // The defect this control was written for, found by writing it: `ts` is not
   // unique — the 16 rows one pass writes land in the same millisecond — so the
   // verdict map keyed on it handed every lookup the same answer, and
@@ -985,7 +1064,7 @@ try {
   );
   check(
     ceilingT > 0 && ceilingD > 0,
-    `the hit metric can score at all: ${ceilingT}/${transportQueries.length} transport and ${ceilingD}/${documentedQueries.length} doc queries retrieve their own gold alone${blindTransport.length ? ` — unretrievable golds: ${[...new Set(blindTransport)].join(", ")}` : ""} — RED if a family goes wholly blind, because a wholly blind family reports 0 in every arm and no other control would notice`,
+    `the hit metric can score at all: ${ceilingT}/${transportQueries.length} transport (exact captured rows) and ${ceilingD}/${documentedQueries.length} doc queries retrieve their own gold alone${blindExact.length ? ` — unretrievable golds: ${[...new Set(blindExact)].join(", ")}` : ""} — RED if a family goes wholly blind, because a wholly blind family reports 0 in every arm and no other control would notice`,
   );
   // The tag's own claim, tested instead of asserted: a row is marked because the
   // tracked tree states the fact. A marked row with no substantive word in common
@@ -1105,6 +1184,7 @@ async function runCaseBank(parent: string): Promise<
     expectTag: boolean;
     got: boolean;
     reason: string;
+    expectReason: string;
     source: string;
   }>
 > {
@@ -1114,12 +1194,21 @@ async function runCaseBank(parent: string): Promise<
     expectTag: boolean;
     got: boolean;
     reason: string;
+    expectReason: string;
     source: string;
   }> = [];
   for (const c of AVAILABILITY_CASES) {
     const dir = join(root, c.id);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "README.md"), c.tree);
+    // A case named for the declared-command branch has to DECLARE the command in
+    // a file `parseGates` reads. Writing only README.md — which is what this did —
+    // means the text branch answers for it and the gate is untested.
+    for (const [path, content] of Object.entries(c.files ?? {})) {
+      const target = join(dir, path);
+      mkdirSync(target.slice(0, target.lastIndexOf("/")), { recursive: true });
+      writeFileSync(target, content);
+    }
     const git = (...args: string[]) => {
       const p = Bun.spawnSync(["git", "-C", dir, ...args], {
         stdout: "pipe",
@@ -1136,6 +1225,7 @@ async function runCaseBank(parent: string): Promise<
       expectTag: c.expectTag,
       got: v !== null,
       reason: v?.reason ?? "",
+      expectReason: c.expectReason ?? "",
       source: c.source,
     });
   }

@@ -21,10 +21,35 @@ export interface AvailabilityCase {
   /** Tracked README content. Each sentence ends in a period: `norm()` collapses
    * newlines, so an unterminated bullet borrows its neighbour's negation. */
   tree: string;
+  /** Extra tracked files, path to content. A case whose name says "declared"
+   * MUST declare the command here: `parseGates` reads `package.json`, `Makefile`,
+   * `makefile`, `justfile` and `.github/workflows/*.yml`, and nothing else. Put
+   * the command in the README instead and the TEXT branch answers for it, which
+   * is exactly how seven gate cases passed while the gate went untested. */
+  files?: Record<string, string>;
   candidate: string;
   expectTag: boolean;
+  /** Asserted when set. Tag-or-keep alone cannot say WHICH branch fired, and that
+   * is the difference between a gate test and a prose test wearing its name. */
+  expectReason?: "in_tracked_file" | "declared_gate";
   source: string;
 }
+
+/** A command declaration `parseGates` really reads. Shared by the gate family so
+ * every one of those cases tests the same declaration. */
+const DEPLOY_MANIFEST: Record<string, string> = {
+  "package.json": JSON.stringify({
+    name: "widget",
+    scripts: { deploy: "rsync -az ./dist/ deploy@box:/srv" },
+  }),
+};
+
+/** A README that says nothing about deploying. Without it a `declared_gate`
+ * expectation could be satisfied by the prose branch and the reason assertion
+ * would be the only thing telling the two apart — which is the defect this
+ * revision exists to close, so the README is neutralised as well as declared. */
+const NEUTRAL_README =
+  "# release\n\nNothing in this file describes deploying.\n";
 
 export const AVAILABILITY_CASES: AvailabilityCase[] = [
   // ── The transport case: the reason the check must not over-refuse ──────────
@@ -127,17 +152,72 @@ export const AVAILABILITY_CASES: AvailabilityCase[] = [
     source:
       "#397 review — matching PART of a candidate does not establish the WHOLE fact",
   },
+  // ── Declared gate: where it does and does not reach ───────────────────────
+  // Review round 4 (WhollyMindless) found that every case below declared its
+  // command in README prose, so the TEXT branch decided all of them and a
+  // mutation replacing `gateHit(spans, gates)` with a null gate left the entire
+  // bank green. They now declare `scripts.deploy` in a real `package.json` and
+  // run against a README that cannot match, with `expectReason` pinning which
+  // branch answered.
   {
-    id: "new-number-on-declared-command",
-    tree: "# release\n\nThe deploy script runs rsync.\n",
-    candidate: "The deploy script retries 3 times before it alerts.",
+    id: "declared-command-restated",
+    tree: NEUTRAL_README,
+    files: DEPLOY_MANIFEST,
+    candidate: "Run `npm run deploy`.",
+    expectTag: true,
+    expectReason: "declared_gate",
+    source:
+      "#389 — the gate rule's true positive; #403 review 4 moved it onto a real declaration",
+  },
+  {
+    id: "make-target-restated",
+    tree: NEUTRAL_README,
+    files: { Makefile: "test:\n\tbun test\n" },
+    candidate: "Run `make test`.",
+    expectTag: true,
+    expectReason: "declared_gate",
+    source:
+      "#403 review 4 — a second gate source, so the bank does not silently depend on package.json alone",
+  },
+  {
+    id: "make-target-new-condition",
+    tree: NEUTRAL_README,
+    files: { Makefile: "test:\\n\\tbun test\\n" },
+    candidate: "Run `make test` before merging.",
     expectTag: false,
     source:
-      "#402 veto 2 — a changed figure is a different fact, not a rephrasing",
+      "#403 review 4 — the counterpart, and the case that was wrong when written: the target is declared, the WHEN is not",
+  },
+  {
+    id: "declared-command-reworded-residual",
+    tree: NEUTRAL_README,
+    files: DEPLOY_MANIFEST,
+    candidate: "Run `npm run deploy` to rsync against the box.",
+    expectTag: false,
+    source:
+      "#397 round 4 — the residual is checked too, and a reworded residual is kept",
+  },
+  {
+    id: "declared-command-new-context",
+    tree: NEUTRAL_README,
+    files: DEPLOY_MANIFEST,
+    candidate: "Use `npm run deploy` when the build is ready.",
+    expectTag: false,
+    source:
+      "#397 round 2 — the manifest states the command, not when to use it",
+  },
+  {
+    id: "prohibition-on-declared-command",
+    tree: NEUTRAL_README,
+    files: DEPLOY_MANIFEST,
+    candidate: "Never run `npm run deploy` on a Friday.",
+    expectTag: false,
+    source: "#397 — a sentence that states a command may also forbid it",
   },
   {
     id: "restriction-on-declared-command",
-    tree: "# release\n\n`npm run deploy` runs rsync against the box.\n",
+    tree: NEUTRAL_README,
+    files: DEPLOY_MANIFEST,
     candidate:
       "Never run `npm run deploy` until finance confirms approval code BLUEBIRD.",
     expectTag: false,
@@ -145,72 +225,52 @@ export const AVAILABILITY_CASES: AvailabilityCase[] = [
   },
   {
     id: "short-restriction-on-declared-command",
-    tree: "# release\n\n`npm run deploy` runs rsync against the box.\n",
+    tree: NEUTRAL_README,
+    files: DEPLOY_MANIFEST,
     candidate: "`npm run deploy` wipes the staging database.",
     expectTag: false,
     source: "#397 round 2 — a short residual is not a restatement",
   },
   {
     id: "second-command-not-swallowed",
-    tree: "# release\n\n`npm run deploy` runs rsync against the box.\n",
+    tree: NEUTRAL_README,
+    files: DEPLOY_MANIFEST,
     candidate:
       "Before `npm run deploy`, run `aws sso login --profile prod` to refresh credentials.",
     expectTag: false,
-    source:
-      "#397 round 4 — every command span was stripped after ONE declared gate",
+    source: "#397 round 2 — the second command is new information",
   },
   {
-    id: "prohibition-on-declared-command",
-    tree: "# release\n\n`npm run deploy` runs rsync against the box.\n",
-    candidate: "Never run `npm run deploy` on a Friday.",
-    expectTag: false,
-    source: "#397 — a sentence that states a command may also forbid it",
-  },
-
-  // ── Declared gate: where it does and does not reach ───────────────────────
-  {
-    id: "declared-command-restated",
-    tree: "# release\n\n`npm run deploy` runs rsync against the box.\n",
-    candidate: "npm run deploy runs rsync against the box.",
-    expectTag: true,
-    source: "#389 — the declared-gate rule's true positive, backticks aside",
-  },
-  {
-    id: "declared-command-reworded-residual",
-    tree: "# release\n\n`npm run deploy` runs rsync against the box.\n",
-    candidate: "Run `npm run deploy` to rsync against the box.",
+    id: "new-number-on-declared-command",
+    tree: NEUTRAL_README,
+    files: DEPLOY_MANIFEST,
+    candidate: "Run `npm run deploy`; it retries 3 times before it alerts.",
     expectTag: false,
     source:
-      "#397 round 4 — the residual is checked too, and a reworded residual is kept",
+      "#402 veto 2 — a changed figure is a different fact, not a rephrasing",
   },
   {
     id: "prose-command-not-a-code-span",
-    tree: "# release\n\n`npm run deploy` runs rsync against the box.\n",
+    tree: NEUTRAL_README,
+    files: DEPLOY_MANIFEST,
     candidate: "Deploy with npm run deploy; it copies the build to the box.",
     expectTag: false,
     source:
-      "self-review of the case bank — the command check reads code spans only, so a prose command is not a match; recorded as a limit, not fixed",
+      "self-review of the case bank — `statedCommands` reads code spans only, so a prose command never reaches the gate; recorded as a limit, not fixed",
   },
   {
     id: "prose-restatement-still-tags",
     tree: "# limits\n\nThe rate limiter keeps state in Redis DB 3, not DB 0 like the rest of the stack.\n",
     // The asymmetry with `prose-command-not-a-code-span` is deliberate: the text
     // side compares claims, so prose restatement is caught even though a prose
-    // command is not. Without this pair the bank cannot say which half of the
-    // check the formatting dependency belongs to.
+    // command is not. Paired, they say which half of the check the formatting
+    // dependency belongs to; either alone says nothing.
     candidate:
       "The rate limiter keeps state in Redis DB 3, not DB 0 like the rest of the stack.",
     expectTag: true,
+    expectReason: "in_tracked_file",
     source:
       "self-review of the case bank — the counterpart to the prose-command limit above",
-  },
-  {
-    id: "declared-command-new-context",
-    tree: "# release\n\n`npm run deploy` runs rsync against the box.\n",
-    candidate: "Use `npm run deploy` when the build is ready.",
-    expectTag: false,
-    source:
-      "#397 round 2 — the manifest states the command, not when to use it",
   },
 
   // ── The gate's own vocabulary must not tag ordinary prose ─────────────────
