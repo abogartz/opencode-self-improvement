@@ -42,7 +42,7 @@ Same 16 captured rows, background resampled at 0/30/90/180 rows; budget recomput
 
 ## Case bank: every adversarial verdict, re-decided
 
-21 (tree, candidate) pairs, one repo each, decided by the shipped availabilityIndex. 6 must tag, 15 must not.
+23 (tree, candidate) pairs, one repo each, decided by the shipped availabilityIndex. 7 must tag, 16 must not.
 
 | case | expect | got | found by |
 | --- | --- | --- | --- |
@@ -65,6 +65,8 @@ Same 16 captured rows, background resampled at 0/30/90/180 rows; budget recomput
 | prohibition-on-declared-command | keep | keep | #397 — a sentence that states a command may also forbid it |
 | declared-command-restated | tag | in_tracked_file | #389 — the declared-gate rule's true positive, backticks aside |
 | declared-command-reworded-residual | keep | keep | #397 round 4 — the residual is checked too, and a reworded residual is kept |
+| prose-command-not-a-code-span | keep | keep | self-review of the case bank — the command check reads code spans only, so a prose command is not a match; recorded as a limit, not fixed |
+| prose-restatement-still-tags | tag | in_tracked_file | self-review of the case bank — the counterpart to the prose-command limit above |
 | declared-command-new-context | keep | keep | #397 round 2 — the manifest states the command, not when to use it |
 | gate-name-in-prose | keep | keep | #397 review — a short gate name does not tag prose that merely contains it |
 
@@ -88,8 +90,8 @@ The scan line reported 6 verdicts and 6 tagged rows; 0 of those verdicts landed 
 - PASS — the guided lane is exempt: a guided AND restatable row still rides 21/21 blocks at every budget that can hold it (691, 1152, 1843, 2765, 3917 bytes)
 - PASS — one model call per pass whatever the policy — availability is decided after the call, so #389 AC4 cannot lower capture cost
 - PASS — prompt containment: every scripted fact really rode the capture prompt
-- PASS — the case bank can say both things: 21 cases, 6 must tag and 15 must not — RED if either polarity is emptied out
-- PASS — the shipped matcher still decides every adversarial case: 21/21 — RED with the case named, so the veto that moved is readable from its "found by" column
+- PASS — the case bank can say both things: 23 cases, 7 must tag and 16 must not — RED if either polarity is emptied out
+- PASS — the shipped matcher still decides every adversarial case: 23/23 — RED with the case named, so the veto that moved is readable from its "found by" column
 - PASS — a read-time drop removes exactly the restatable rows and nothing else: it keeps 10/10 transport facts and 191 of 197 rows — RED if a verdict is read from the wrong row, which is what a ts-keyed lookup does when a pass writes rows in one millisecond
 - PASS — the hit metric can score at all: 14/21 transport and 6/6 doc queries retrieve their own gold alone — unretrievable golds: m01, m02, m04, m07, m08, m12, m14 — RED if a family goes wholly blind, because a wholly blind family reports 0 in every arm and no other control would notice
 - PASS — the win is not an artefact of one store size: tag is at or above both delete-original and drop-at-read on transport facts at all 4 background sizes x 3 budgets (0:8/9/9 30:8/9/9 90:7/9/9 180:8/9/9)

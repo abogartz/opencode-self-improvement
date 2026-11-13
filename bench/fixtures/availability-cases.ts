@@ -184,6 +184,27 @@ export const AVAILABILITY_CASES: AvailabilityCase[] = [
       "#397 round 4 — the residual is checked too, and a reworded residual is kept",
   },
   {
+    id: "prose-command-not-a-code-span",
+    tree: "# release\n\n`npm run deploy` runs rsync against the box.\n",
+    candidate: "Deploy with npm run deploy; it copies the build to the box.",
+    expectTag: false,
+    source:
+      "self-review of the case bank — the command check reads code spans only, so a prose command is not a match; recorded as a limit, not fixed",
+  },
+  {
+    id: "prose-restatement-still-tags",
+    tree: "# limits\n\nThe rate limiter keeps state in Redis DB 3, not DB 0 like the rest of the stack.\n",
+    // The asymmetry with `prose-command-not-a-code-span` is deliberate: the text
+    // side compares claims, so prose restatement is caught even though a prose
+    // command is not. Without this pair the bank cannot say which half of the
+    // check the formatting dependency belongs to.
+    candidate:
+      "The rate limiter keeps state in Redis DB 3, not DB 0 like the rest of the stack.",
+    expectTag: true,
+    source:
+      "self-review of the case bank — the counterpart to the prose-command limit above",
+  },
+  {
     id: "declared-command-new-context",
     tree: "# release\n\n`npm run deploy` runs rsync against the box.\n",
     candidate: "Use `npm run deploy` when the build is ready.",
