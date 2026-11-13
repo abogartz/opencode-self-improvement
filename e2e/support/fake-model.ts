@@ -57,6 +57,30 @@ function stepFor(body: any): { step: any; served: string } {
     body.tools.length > 0 &&
     (first.includes("You are an AI agent") || first.includes("OpenCode"));
   const all = JSON.stringify(msgs);
+  // Capture lane. The auto-capture pass is a plain generation with NO tools
+  // array, so the rule above can never serve it and every scripted step falls
+  // through to the canned reply. That is why no end-to-end scenario drove capture
+  // through a real host: the harness structurally could not answer it. Recognized
+  // by the extractor prompt's own opening line (src/capture/prompt.ts). If that
+  // line changes, this stops matching and the capture scenario fails loudly with
+  // `outcome=empty` rather than passing on a canned reply.
+  const capturePass =
+    !agent && first.includes("You mine one coding-agent session transcript");
+  const capMarker = capturePass
+    ? Object.keys(steps).find((m) => all.includes(m))
+    : undefined;
+  if (capMarker) {
+    const key = `${capMarker}#capture`;
+    const n = counters[key] ?? 0;
+    counters[key] = n + 1;
+    const arr = steps[capMarker];
+    // The capture reply is the LAST step under the marker: the agent turn's own
+    // steps come first, so the lane indexes from the end and never consumes one.
+    return {
+      step: arr[arr.length - 1],
+      served: `${key}[${n}]`,
+    };
+  }
   const marker = agent
     ? Object.keys(steps).find((m) => all.includes(m))
     : undefined;
