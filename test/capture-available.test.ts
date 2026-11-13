@@ -731,4 +731,94 @@ describe("capture availability tag (#389, #402)", () => {
     expect(Number(scan?.verdicts)).toBe(1);
     expect(Number(scan?.restatements)).toBe(0);
   });
+
+  test("a warning that QUOTES a claim is not a restatement of it (#403 review)", async () => {
+    // Review 4568409650. Narrowing the polarity comparison to the cue list fixed
+    // `Do not assume X.` but re-opened a family the cue list does not carry:
+    //   Stop assuming the cache supports TTL expiration.
+    //   Drop the assumption that the parser keeps comments.
+    // Both contain the affirmative sentence they warn against, and neither
+    // `stop` nor `drop` is a negation cue — nor does `polaritySigns` see it, so
+    // the broader predicate an earlier round tried would not have caught this
+    // either. The veto reads the words between the sentence start and the hit.
+    const repo = join(fixture.root, "warned");
+    mkdirSync(repo, { recursive: true });
+    writeFileSync(
+      join(repo, "README.md"),
+      "Stop assuming the cache supports TTL expiration.\n\n" +
+        "Drop the assumption that the parser keeps comments.\n\n" +
+        "The queue drains at zero.\n",
+    );
+    git(repo, "init", "-q");
+    git(repo, "add", ".");
+    await capture(repo, [
+      {
+        type: "learning",
+        scope: "warn1",
+        content: "The cache supports TTL expiration.",
+      },
+      {
+        type: "learning",
+        scope: "warn2",
+        content: "The parser keeps comments.",
+      },
+      // Control in the same repo: the veto must not simply switch the check off.
+      {
+        type: "learning",
+        scope: "warn3",
+        content: "The queue drains at zero.",
+      },
+    ]);
+    expect(tagFor("warn1")).toHaveLength(0);
+    expect(tagFor("warn2")).toHaveLength(0);
+    expect(tagFor("warn3").length).toBe(1);
+    // All three rows exist either way — a verdict is a tag, never a deletion.
+    for (const scope of ["warn1", "warn2", "warn3"])
+      expect((await rowsWith(scope)).length).toBe(1);
+    expect((await rowsWith("warn1"))[0]?.tags ?? []).not.toContain(
+      RESTATABLE_TAG,
+    );
+    expect((await rowsWith("warn3"))[0]?.tags ?? []).toContain(RESTATABLE_TAG);
+  });
+
+  test("the logged span cannot carry a credential the stored content redacted (#403 review)", async () => {
+    // Review 4568409660. `norm()` lowercases before the verdict's `matched` span
+    // is cut, and the prefix scrubber matches `AKIA[A-Z0-9]{16}` CASE-SENSITIVELY,
+    // so the stored row said `[redacted]` while the evidence line said
+    // `akia1234567890abcdef` — recoverable by uppercasing. Redacting the span
+    // later cannot undo normalisation, so the scrub now happens on the raw text.
+    const SECRET = "AKIA1234567890ABCDEF";
+    const repo = join(fixture.root, "span-secret");
+    mkdirSync(repo, { recursive: true });
+    writeFileSync(
+      join(repo, "README.md"),
+      `The staging access key is ${SECRET} for the integration account.\n`,
+    );
+    git(repo, "init", "-q");
+    git(repo, "add", ".");
+    const sid = await capture(repo, [
+      {
+        type: "learning",
+        scope: "creds",
+        content: `The staging access key is ${SECRET} for the integration account.`,
+      },
+    ]);
+    const tagged = tagFor("creds");
+    // The case only means something if the row was tagged and a span was logged.
+    expect(tagged.length).toBe(1);
+    expect(String(tagged[0].matched)).toContain("[redacted]");
+    // Every field of the RAW line, not just the one under test: normalisation
+    // has more than one way to hide a secret from a case-sensitive scrubber.
+    const raw = readFileSync(join(evidenceDir(), `${dateStr()}.logfmt`), "utf8")
+      .split("\n")
+      .filter((l) => l.includes(`session=${sid}`) && l.includes("creds"));
+    expect(raw.length).toBeGreaterThan(0);
+    for (const line of raw) {
+      expect(line.toLowerCase()).not.toContain("akia1234567890abcdef");
+      expect(line).not.toContain(SECRET);
+    }
+    const row = (await rowsWith("creds"))[0];
+    expect(String(row?.content)).toContain("[redacted]");
+    expect(String(row?.content)).not.toContain(SECRET);
+  });
 });

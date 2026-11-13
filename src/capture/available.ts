@@ -64,6 +64,7 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { POL_NEG, numericTokens, polaritySigns } from "../core/tokenize.ts";
+import { redactSecrets } from "../store/secrets.ts";
 
 /** What made a candidate restatable, and where the next session can get it. */
 export type AvailabilityVerdict = {
@@ -497,13 +498,57 @@ function forbidsCommand(content: string, commands: string[]): boolean {
   return false;
 }
 
-/** The whole sentence around `start .. start+len`, walked out to the boundaries. */
-function sentenceAt(text: string, start: number, len: number): string {
+/** The whole sentence around `start .. start+len`, with the offset it starts at. */
+function sentenceSpan(
+  text: string,
+  start: number,
+  len: number,
+): { text: string; at: number } {
   let a = start;
   while (a > 0 && !isBoundary(text.charCodeAt(a - 1))) a--;
   let b = start + len;
   while (b < text.length && !isBoundary(text.charCodeAt(b))) b++;
-  return text.slice(a, b);
+  return { text: text.slice(a, b), at: a };
+}
+
+/**
+ * VETO 1b (#403 review): does this prefix WARN AGAINST the claim that follows?
+ *
+ * `Stop assuming the cache supports TTL expiration.` contains the affirmative
+ * sentence `The cache supports TTL expiration.` as the object of `stop assuming`.
+ * A substring test plus cue equality merges a warning with the claim it warns
+ * against, because the cue list carries neither `stop` nor `drop` — and neither
+ * does `polaritySigns`, so widening it the way an earlier round tried does not
+ * catch this either. Measured on 05482ba: both `Stop assuming X` and `Drop the
+ * assumption that X` tagged `X` as restatable.
+ *
+ * The veto reads the words between the sentence start and the hit, not the whole
+ * sentence, and that is what keeps it cheap in tags. `The parser drops stale
+ * entries.` states its claim and keeps its tag, because `drops` there governs
+ * `stale entries`, not a following assertion; the ambiguous verbs are therefore
+ * veto words only when a claim noun follows them. Every veto declines to tag,
+ * which is the direction this file fails safe in.
+ */
+const WARNS_AGAINST = new RegExp(
+  // One alternation, ONE shared tail. Written as three separate alternatives
+  // each ending in `$`, only the last would be anchored and the first would
+  // match any sentence that merely contains `stop` anywhere — measured, and it
+  // cost the tag from `The job stops at midnight and the cache supports TTL
+  // expiration.`, which states its claim plainly.
+  "(?:" +
+    // A deterrent verb needs no framing: what follows is being warned against.
+    "\\b(?:stop|stops|stopped|stopping|cease|ceases|ceased|quit|quits|quitting|beware|caution\\w*)\\b" +
+    // An ordinary verb becomes a deterrent only with a claim noun behind it.
+    "|\\b(?:drop|drops|dropped|dropping|discard\\w*|dismiss\\w*|reject\\w*|forget|forgets|forgot|forgetting|ignor\\w*|overlook\\w*)\\b\\s+(?:the|your|this|an|any)\\s+(?:assumption|assumptions|idea|ideas|notion|notions|belief|beliefs|thinking|fact)\\b" +
+    // Claim verbs govern whatever follows them, framed or not.
+    "|\\b(?:assume|assumes|assumed|assuming|believ\\w*|think|thinks|thought)\\b" +
+    // Optional `that`, then nothing: the claim starts here.
+    ")\\s*(?:that\\s*)?$",
+  "i",
+);
+
+function warnsAgainst(prefix: string): boolean {
+  return WARNS_AGAINST.test(prefix);
 }
 
 /**
@@ -518,7 +563,9 @@ function sentenceAt(text: string, start: number, len: number): string {
  *   - begin and end on a word boundary: `use tabs` is not a hit inside
  *     `abuse tabs`; and
  *   - sit in a sentence that shares the clause's polarity. Negation the tree
- *     carries and the clause drops is a reversal, not a restatement.
+ *     carries and the clause drops is a reversal, not a restatement; and
+ *   - not be the object of a warning. `Stop assuming X.` states `X` only to
+ *     reject it, and no polarity test of any breadth sees that (VETO 1b).
  * A reversed clause is not evidence of availability, and every uncertainty in
  * this file keeps the candidate.
  */
@@ -530,10 +577,14 @@ function findClause(hay: string, clause: string): number {
     const before = i > 0 ? hay.charCodeAt(i - 1) : 32;
     const after =
       i + clause.length < hay.length ? hay.charCodeAt(i + clause.length) : 32;
+    const sentence = sentenceSpan(hay, i, clause.length);
     if (
       !/\w/.test(String.fromCharCode(before)) &&
       !/\w/.test(String.fromCharCode(after)) &&
-      cueNegated(sentenceAt(hay, i, clause.length)) === reversed
+      cueNegated(sentence.text) === reversed &&
+      // A later occurrence may state the claim plainly, so a vetoed hit is
+      // skipped rather than ending the search.
+      !warnsAgainst(hay.slice(sentence.at, i))
     )
       return i;
     from = i + 1;
@@ -640,6 +691,16 @@ export function availabilityIndex(
       const needed = claims(whole);
       if (needed.length === 0) needed.push(whole);
       const first = needed[0] ?? whole;
+      // Evidence mirror of `whole` and `first`, scrubbed WHILE THE TEXT STILL HAS
+      // ITS CASE. `norm()` lowercases, and the prefix scrubber in
+      // store/secrets.ts matches `AKIA[A-Z0-9]{16}` case-sensitively, so a span
+      // normalised before scrubbing keeps a fully recoverable access key: the
+      // logged `akia1234567890abcdef` uppercases straight back to the secret
+      // (#403 review). Redacting `avail.matched` later cannot recover what
+      // normalisation already destroyed, so this is the only place it can be
+      // done. Verdict logic reads `needed`/`first`, never these.
+      const safeWhole = norm(redactSecrets(content));
+      const safeFirst = claims(safeWhole)[0] ?? safeWhole;
       if (haystack && allRestatable(haystack, needed)) {
         return {
           reason: "in_tracked_file",
@@ -648,7 +709,7 @@ export function availabilityIndex(
               repoDir,
               join(repoDir, fileAt(findClause(haystack, first))),
             ) || "?",
-          matched: first.slice(0, 120),
+          matched: safeFirst.slice(0, 120),
         };
       }
       // Declared gate. Round 3 (WhollyMindless) removed the LENGTH test: a short
@@ -695,7 +756,7 @@ export function availabilityIndex(
           return {
             reason: "declared_gate",
             where: gate.where,
-            matched: whole.slice(0, 120),
+            matched: safeWhole.slice(0, 120),
           };
         }
       }
