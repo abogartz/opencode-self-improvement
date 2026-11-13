@@ -700,6 +700,13 @@ export function configureAutoCapture(
         let lessonsKept = 0;
         let lessonsRefused = 0;
         // #402: rows tagged `restatable` this pass. Counted, never dropped.
+        // Two numbers, because they are two different facts and one field that
+        // silently means "verdicts" reads as "rows" (#403 review round 1). A
+        // verdict lands on candidates the write gate then refuses — a dup, a
+        // credential-shaped scope — and a refused row carries no tag, so the
+        // verdict count is an upper bound on the tagged count, never equal by
+        // construction.
+        let availVerdicts = 0;
         let restatements = 0;
         candidates = candidates.filter((c) => {
           if (c.failure === undefined) return true;
@@ -744,7 +751,7 @@ export function configureAutoCapture(
           // survivable, which is why four rounds of patches could not produce it.
           const avail = availability().check(c.content);
           if (avail) {
-            restatements++;
+            availVerdicts++;
             await record(
               "auto_capture_restatable",
               {
@@ -756,8 +763,13 @@ export function configureAutoCapture(
                 where: avail.where,
                 matched: avail.matched,
                 // The whole candidate, so the audit line alone can rebuild a row
-                // a later consolidation drops. Redacted first, as every other
-                // capture line does.
+                // a later consolidation drops. It records the VERDICT, not proof
+                // of storage: this line is written before the gate, so a
+                // candidate the gate then refuses has one and no row. The row's
+                // fate is the adjacent `auto_capture_<action>` line, same pass,
+                // same type and scope; `restatements` on the scan line counts
+                // only rows that were really tagged. Redacted first, as every
+                // other capture line does.
                 content: redactSecrets(c.content),
                 ...(c.guided ? { guided: true } : {}),
                 ...(modelTag ? { model: modelTag } : {}),
@@ -852,6 +864,10 @@ export function configureAutoCapture(
             );
             continue;
           }
+          // The tag exists only on a row the gate really wrote. `blocked` writes
+          // nothing and `collapsed` folds into an existing row whose tags are not
+          // these, so only `promoted` can carry `restatable` into the store.
+          if (avail && outcome.action === "promoted") restatements++;
           await record(
             trigger === "compaction"
               ? `auto_capture_compaction_${outcome.action}`
@@ -921,6 +937,11 @@ export function configureAutoCapture(
               ms: availableMs,
               tracked: scan.tracked,
               capped: scan.capped,
+              // Two numbers on purpose: `verdicts` is how many candidates the
+              // check matched, `restatements` how many rows carry the tag. They
+              // differ exactly by the verdicts the write gate refused, and a
+              // reader who sees one number will assume it is the other.
+              verdicts: availVerdicts,
               restatements,
               ...(modelTag ? { model: modelTag } : {}),
             },

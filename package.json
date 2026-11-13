@@ -65,6 +65,7 @@
     "bench": "bun bench/runners/inject-cost.ts",
     "bench:recall": "bun bench/runners/recall-quality.ts",
     "bench:write": "bun bench/runners/write-latency.ts",
+    "bench:availability": "bun bench/runners/availability-policy-compare.ts",
     "sweep:test": "bun scripts/test-sweep.ts",
     "memory-view": "bun run src/viewer/server.ts",
     "format": "biome format --write",

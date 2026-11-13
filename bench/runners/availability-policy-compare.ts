@@ -109,6 +109,16 @@ function makeRepo(dir: string): void {
       .map((d) => `- ${d}.`)
       .join("\n")}\n`,
   );
+  // One transport fact's prose cites `config/limits.ts`, and the write gate
+  // refuses a write whose cited path is absent (`ref_path_missing`), so that
+  // candidate was silently losing its row and the store held 15 of 16. The file
+  // exists here so conservation is exact; the control that names any missing row
+  // still fires if a future candidate cites something else.
+  mkdirSync(join(dir, "config"), { recursive: true });
+  writeFileSync(
+    join(dir, "config", "limits.ts"),
+    "export const QUOTA = 500;\n",
+  );
   writeFileSync(
     join(dir, "package.json"),
     JSON.stringify(
@@ -264,6 +274,18 @@ try {
   const stored = (await loadAll()).filter(
     (m) => isActive(m) && m.tags?.includes("auto-capture"),
   );
+
+  if (process.env.AVAIL_DUMP) {
+    const missing = candidates.filter(
+      (c) => !stored.some((m) => m.content.includes(c.content.slice(0, 40))),
+    );
+    console.log(`DUMP stored=${stored.length} missing=${missing.length}`);
+    for (const m of missing) console.log(`DUMP MISSING: ${m.content}`);
+    const ev = readFileSync(join(evidenceDir(), `${dateStr()}.logfmt`), "utf8");
+    for (const l of ev.split("\n"))
+      if (/blocked|dup|refus|gate|rejected/i.test(l))
+        console.log(`DUMP EV: ${l.slice(0, 240)}`);
+  }
 
   // Verdicts from the SHIPPED check, over the shipped rows.
   const idx = availabilityIndex(repo);
@@ -438,8 +460,28 @@ try {
   lines.push("");
   lines.push(
     `Arms in every column: ${names.join(" / ")}. The guided row is exempt from the demotion by ` +
-      `design and rode ${cell("tag", FRACS[0]!).guidedRides}/${transportQueries.length} blocks at ` +
-      `the tightest budget.`,
+      `design and rode ${cell("tag", FRACS[FRACS.length - 1]!).guidedRides}/${transportQueries.length} ` +
+      `blocks at the loosest budget; the exemption control below measures it from the first budget ` +
+      `that can physically hold the line, because at 15% the header plus the guided row exceeds the ` +
+      `budget in every arm and that is arithmetic, not policy.`,
+  );
+  // The cost, stated by the harness rather than left for the reader to find in
+  // the table. A demoted row that is the best answer to its own question loses
+  // that slot to a better match — the tree states the fact, so the demotion is
+  // correct, and the loss is still real and belongs in the same report.
+  const paid = FRACS.filter(
+    (f) => cell("tag", f).docHits < cell("off", f).docHits,
+  );
+  lines.push("");
+  lines.push(
+    paid.length === 0
+      ? "No doc-query cost observed at any budget."
+      : `**Cost.** The tag arm answers ${col("tag", "docHits")} of ` +
+          `${documentedQueries.length} queries about facts the README also states, where the no-check arm ` +
+          `answers ${col("off", "docHits")}. It gives up those slots at ` +
+          `${paid.map((f) => `${Math.round(f * 100)}%`).join(", ")} budget — the demotion working as ` +
+          `designed, because the tree has the fact, and a real loss all the same. At 85% the budget ` +
+          `holds everything and the two arms agree.`,
   );
   lines.push("");
 
@@ -460,6 +502,52 @@ try {
       new Set(arms.tag!.map((m) => m.content)).size ===
         new Set(arms.off!.map((m) => m.content)).size,
     `no drop: the tag arm holds every row the no-check arm holds (${arms.tag!.length}), of which ${tagged.length} carry the tag — RED if any path in available.ts prevents a write`,
+  );
+  // Pins the MEANING of the two scan fields, which a review round got wrong.
+  // `verdicts` counts candidates the availability check matched; `restatements`
+  // counts rows that really carry the tag. The verdict fires before the write
+  // gate, so a candidate the gate refuses (a dup, a credential-shaped scope) has a
+  // verdict and no row: `verdicts >= restatements`, and only `restatements` is a
+  // fact about the store. This fixture lands one verdict on a refused candidate,
+  // so it exercises the gap rather than assuming it away.
+  const scanLine = readFileSync(
+    join(evidenceDir(), `${dateStr()}.logfmt`),
+    "utf8",
+  )
+    .split("\n")
+    .filter(
+      (l) => l.includes("ev=auto_capture_scan") && l.includes(`session=${sid}`),
+    )
+    .map((l) => parseLine(l))
+    .filter((v) => v !== undefined);
+  const scan = scanLine[0] ?? {};
+  check(
+    scanLine.length === 1 &&
+      Number(scan.restatements) === tagged.length &&
+      Number(scan.verdicts) >= tagged.length,
+    `the scan line separates its two numbers: verdicts=${scan.verdicts} (candidates the check matched) vs restatements=${scan.restatements} (rows that carry the tag) — RED if a verdict the write gate refused is reported as a tagged row, or if either field drifts`,
+  );
+  // Whether THIS fixture happens to contain a refused candidate is a property of
+  // the fixture, not a claim about the code, so it is reported and not asserted.
+  // The case itself is pinned in test/capture-available.test.ts.
+  lines.push("");
+  lines.push(
+    `The scan line reported ${scan.verdicts} verdicts and ${scan.restatements} tagged rows; ` +
+      `${Number(scan.verdicts) - Number(scan.restatements)} of those verdicts landed on a candidate ` +
+      `the write gate refused. The two fields are kept apart because a single number invites reading ` +
+      `a verdict as a stored row.`,
+  );
+  lines.push("");
+  // Conservation, named. The capture path is allowed to lose a row only to a
+  // gate decision the report can show; a row that vanishes with no explanation
+  // makes every number above meaningless, because the arms are scored over rows
+  // that exist.
+  const missing = candidates.filter(
+    (c) => !stored.some((m) => m.content.includes(c.content.slice(0, 40))),
+  );
+  check(
+    missing.length === 0,
+    `conservation: all ${candidates.length} scripted candidates reached the store${missing.length ? ` — LOST: ${missing.map((m) => m.content.slice(0, 48)).join(" | ")}` : ""}, RED with the lost prose named so the gate reason can be read off the trail`,
   );
   check(
     originalKills.length === TRANSPORT_WITH_COMMAND.length,

@@ -592,5 +592,52 @@ describe("capture availability tag (#389, #402)", () => {
     expect(Number(scan?.bytes)).toBeGreaterThan(0);
     expect(String(scan?.tracked)).toBe("true");
     expect(Number(scan?.restatements)).toBe(1);
+    expect(Number(scan?.verdicts)).toBe(1);
+  });
+
+  test("a verdict on a row the gate refuses is a verdict, not a tag (#403 review)", async () => {
+    // The availability check runs BEFORE the write gate, so a candidate can earn
+    // a verdict and then be refused — here for a credential-shaped scope. The
+    // first version counted the verdict, so the scan line read `restatements=1`
+    // for a store with no tagged row at all. Two fields now, and only the second
+    // one is a fact about the store.
+    const sid = await capture(
+      makeRepo("blocked-verdict"),
+      [
+        {
+          type: "learning",
+          scope: "api_key=sk-abcdefghij1234567890",
+          content: README_TEXT,
+        },
+      ],
+      "ses-blocked-verdict",
+    );
+    const ev = readEvidenceLog();
+    const scan = ev.find(
+      (l) => l.ev === "auto_capture_scan" && String(l.session) === sid,
+    );
+    // The verdict really fired, and the row really did not land: without both,
+    // the assertion below would pass on a pass that did nothing.
+    expect(
+      ev.some(
+        (l) =>
+          l.ev === "auto_capture_restatable" &&
+          String(l.session) === sid &&
+          String(l.reason) === "in_tracked_file",
+      ),
+    ).toBe(true);
+    expect(
+      ev.some(
+        (l) =>
+          l.ev === "auto_capture_blocked" &&
+          String(l.session) === sid &&
+          String(l.reason) === "credential_in_metadata",
+      ),
+    ).toBe(true);
+    expect(
+      (await loadAll()).some((m) => m.tags?.includes(RESTATABLE_TAG)),
+    ).toBe(false);
+    expect(Number(scan?.verdicts)).toBe(1);
+    expect(Number(scan?.restatements)).toBe(0);
   });
 });
