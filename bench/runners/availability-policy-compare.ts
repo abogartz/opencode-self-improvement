@@ -45,6 +45,7 @@
 //   bun bench/runners/availability-policy-compare.ts
 import {
   appendFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -1009,6 +1010,61 @@ try {
   check(
     FRACS.every((f) => cell("drop-at-read", f).restatableBytes === 0),
     `the P3 preview does what it claims: drop-at-read spends 0 block bytes on facts the tree states at every budget — and the transport column is the price (${col("drop-at-read", "transportHits")} vs tag ${col("tag", "transportHits")})`,
+  );
+
+  // ── Is the verdict a property of the tree, or of the row? ───────────────────
+  // The tag's entire justification is that the TRACKED TREE states the fact. That
+  // is testable: empty the tree's text and no row can still be restatable. It is
+  // also the one axis where a read-time policy beats deleting a row outright — when
+  // the tracked sentence goes away the row is retrievable again, and a deleted row
+  // never comes back. Measured on a COPY of the repo, so every arm above keeps the
+  // tree it was measured against.
+  const stillMarkedWith = (name: string, stripManifests: boolean): number => {
+    const dir = join(scratch, `emptied-${name}`);
+    cpSync(repo, dir, { recursive: true });
+    writeFileSync(join(dir, "README.md"), "# widget\n");
+    if (stripManifests) {
+      writeFileSync(join(dir, "package.json"), '{ "name": "widget" }\n');
+      writeFileSync(join(dir, "Makefile"), "# no targets\n");
+    }
+    const probe = availabilityIndex(dir);
+    return markedAll.filter((m) => probe.check(m.content) !== null).length;
+  };
+  const markedProseGone = stillMarkedWith("prose", false);
+  const markedAllGone = stillMarkedWith("all", true);
+  lines.push("");
+  lines.push("## Is the verdict a property of the tree, or of the row?");
+  lines.push("");
+  lines.push(
+    `The tag claims the tracked tree already states the fact, so emptying the tree must un-mark every ` +
+      `row. Copied repo, emptied text, same rows, shipped check:`,
+  );
+  lines.push("");
+  lines.push("| tree state | rows still marked |");
+  lines.push("| --- | ---: |");
+  lines.push(`| as shipped | ${markedAll.length} |`);
+  lines.push(`| README prose emptied, manifests intact | ${markedProseGone} |`);
+  lines.push(`| prose and declared commands both emptied | ${markedAllGone} |`);
+  lines.push("");
+  lines.push(
+    `${markedAll.length - markedProseGone} of ${markedAll.length} verdicts came from the prose and ` +
+      `disappear with it. The difference this exposes belongs to P3 rather than to this change: a ` +
+      `read-time drop re-asks the question on every read, so a row whose tracked sentence has since been ` +
+      `deleted becomes retrievable on its own again. A deleted row has no such moment — the tag arm holds ` +
+      `${arms.tag!.length} rows, the hardened arm ${arms["delete-hardened"]!.length} and the original ` +
+      `${arms["delete-original"]!.length}, and the ${arms.tag!.length - arms["delete-hardened"]!.length} ` +
+      `and ${arms.tag!.length - arms["delete-original"]!.length} rows those arms never wrote stay unwritten ` +
+      `whatever the tree later says.`,
+  );
+  lines.push("");
+
+  // The claim, tested: the verdict follows the tree. If any row stayed marked with
+  // nothing left in the tree to state it, the tag would be justified by something in
+  // the row alone, and every byte figure in this report would rest on a check that
+  // reads the candidate and not the repository.
+  check(
+    markedAllGone === 0 && markedProseGone <= markedAll.length,
+    `the verdict follows the tree, not the row: ${markedAll.length} rows marked against the shipped tree, ${markedProseGone} still marked with the README prose emptied, ${markedAllGone} with the tree emptied entirely — RED if anything survives an empty tree, because then the tag is justified by something the tree has nothing to do with`,
   );
 
   lines.push("## Controls");

@@ -75,6 +75,19 @@ Same 16 captured rows, background resampled at 0/30/90/180 rows; budget recomput
 
 The scan line reported 6 verdicts and 6 tagged rows; 0 of those verdicts landed on a candidate the write gate refused. The two fields are kept apart because a single number invites reading a verdict as a stored row.
 
+
+## Is the verdict a property of the tree, or of the row?
+
+The tag claims the tracked tree already states the fact, so emptying the tree must un-mark every row. Copied repo, emptied text, same rows, shipped check:
+
+| tree state | rows still marked |
+| --- | ---: |
+| as shipped | 6 |
+| README prose emptied, manifests intact | 0 |
+| prose and declared commands both emptied | 0 |
+
+6 of 6 verdicts came from the prose and disappear with it. The difference this exposes belongs to P3 rather than to this change: a read-time drop re-asks the question on every read, so a row whose tracked sentence has since been deleted becomes retrievable on its own again. A deleted row has no such moment — the tag arm holds 197 rows, the hardened arm 191 and the original 187, and the 6 and 10 rows those arms never wrote stay unwritten whatever the tree later says.
+
 ## Controls
 
 - PASS — the background really competes: the 180 seeded rows plus the guided control are the identical set in every storage arm (sizes 197/197/191/191/187 — drop-at-read is smaller on purpose, it filters at read time) — RED if a filter drops them again
@@ -99,6 +112,7 @@ The scan line reported 6 verdicts and 6 tagged rows; 0 of those verdicts landed 
 - PASS — every marked row is supported by the tracked tree: 6 marked of 196 rows, 0 with no substantive word in common — RED if a row is marked on nothing, or if nothing is marked at all
 - PASS — the win is not an artefact of one store size: tag is at or above both delete-original and drop-at-read on transport facts at all 4 background sizes x 3 budgets (0:8/9/9 30:8/9/9 90:7/9/9 180:8/9/9)
 - PASS — the P3 preview does what it claims: drop-at-read spends 0 block bytes on facts the tree states at every budget — and the transport column is the price (7,8,9,9,9 vs tag 7,8,9,9,9)
+- PASS — the verdict follows the tree, not the row: 6 rows marked against the shipped tree, 0 still marked with the README prose emptied, 0 with the tree emptied entirely — RED if anything survives an empty tree, because then the tag is justified by something the tree has nothing to do with
 
 Scan cost for these 16 candidates: 3 files, 810 bytes, capped=false. A pass with no candidates builds the index never (test/capture-available.test.ts pins it).
 
