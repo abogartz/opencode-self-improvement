@@ -2,13 +2,16 @@
 // availability REFUSAL into a TAG actually win anything, measured on a store
 // built only by the shipped capture path?
 //
-// Four arms over ONE identical capture pass — same fake repo, same scripted
+// Five arms over ONE identical capture pass — same fake repo, same scripted
 // model reply, same distractors — differing only in what the availability
 // verdict does:
 //
 //   off               no availability check at all
 //   tag               #403 as shipped: store the row, tag it `restatable`,
 //                     retrieval gives it up first under a byte budget
+//   drop-at-read      P3 preview: the row is stored, and a read never shows it.
+//                     Applied to the background as well, because a read-time
+//                     drop would not know which rows capture wrote
 //   delete-hardened   #397 head (`1930bf6`) policy: DROP what #403 tags
 //   delete-original   #389's first rule (`362655c`): DROP any row that states
 //                     a command the project declares, no residual test
@@ -63,6 +66,7 @@ import { availabilityIndex } from "../../src/capture/available.ts";
 import { availabilityIndex as historicalAvailabilityIndex } from "../fixtures/available-362655c.ts";
 import { selectRelevant } from "../../src/recall/relevant.ts";
 import { buildStore, MEMORIES, QUERIES } from "../fixtures/recall-dataset.ts";
+import { AVAILABILITY_CASES } from "../fixtures/availability-cases.ts";
 import { loadPlugin } from "../../test/harness.ts";
 
 // --- the fake repo ---------------------------------------------------------------
@@ -185,6 +189,8 @@ try {
 
   // Equal competition, never gold, never captured. Same field every arm sees —
   // the arms differ only in the availability policy, so nothing else may move.
+  // 180, not 30: the size sweep below needs a large store to sample from, and a
+  // claim measured at ONE competitor count is a claim about that count.
   const goldIds = new Set([...TRANSPORT.map((m) => m.id)]);
   const distractors = buildStore(600)
     .filter(
@@ -193,14 +199,21 @@ try {
         m.type !== "decision" &&
         m.type !== "preference",
     )
-    .slice(0, 30);
+    .slice(0, 180);
   mkdirSync(process.env.OPENCODE_MEMORY_DIR, { recursive: true });
   appendFileSync(
     join(process.env.OPENCODE_MEMORY_DIR, `${dateStr()}.logfmt`),
     distractors
-      .map((d) =>
+      .map((d, i) =>
         formatLine({
-          ts: `2026-01-01T00:00:0${(d.id.length % 9) + 1}.000Z`,
+          // One timestamp per row, from its index. An earlier revision wrote
+          // `00:00:0${(d.id.length % 9) + 1}`: nine distinct values across 180
+          // rows. The verdict map is keyed on `ts`, so most rows were absent
+          // from it and every reader of it treated an absent row as restatable.
+          // A control below asserts the map is total, which needs these distinct.
+          ts: new Date(
+            Date.UTC(2026, 0, 1, 0, 0, 0, 1_000 + i * 7),
+          ).toISOString(),
           type: d.type,
           scope: d.scope,
           content: d.content,
@@ -286,16 +299,42 @@ try {
   // AND background. Scoring only the captured rows would hide restatable bytes that
   // a real block spends on ordinary memory.
   const idx = availabilityIndex(repo);
-  const verdict = new Map(
-    [...stored, ...seeded].map((m) => [m.ts, idx.check(m.content)]),
-  );
+  /**
+   * The verdict is a pure function of the row's content, so that is what it is
+   * keyed on. It used to be keyed on `ts`, and `ts` is NOT unique: the 16 rows
+   * this pass writes land in the same millisecond, so the map held one entry for
+   * all of them and every lookup returned whichever row happened to be written
+   * last. `drop-at-read` then deleted all 16 captured rows because six of them
+   * were restatable. A control below pins the count it got wrong.
+   */
+  const verdictCache = new Map<
+    string,
+    ReturnType<typeof idx.check> | undefined
+  >();
+  const verdictOf = (m: Memory): ReturnType<typeof idx.check> => {
+    const hit = verdictCache.get(m.content);
+    if (hit !== undefined) return hit;
+    const v = idx.check(m.content);
+    verdictCache.set(m.content, v);
+    return v;
+  };
   const tagged = stored.filter((m) => m.tags?.includes(RESTATABLE_TAG));
   /** Restatable by the shipped check, independent of what each arm stored. */
-  const isRestatable = (m: Memory): boolean => verdict.get(m.ts) !== null;
+  const isRestatable = (m: Memory): boolean => verdictOf(m) !== null;
 
-  // The historical rule, replayed by the module that shipped it.
+  // The historical rule, replayed by the module that shipped it. Cached: the size
+  // sweep rebuilds every arm four times and this is a tree scan.
   const hist = historicalAvailabilityIndex(repo);
-  const originalKills = stored.filter((m) => hist.check(m.content) !== null);
+  // Same content keying as `verdictOf`, for the same reason: `ts` is not unique.
+  const histCache = new Map<string, ReturnType<typeof hist.check>>();
+  const histOf = (m: Memory): ReturnType<typeof hist.check> => {
+    const hit = histCache.get(m.content);
+    if (hit !== undefined) return hit;
+    const v = hist.check(m.content);
+    histCache.set(m.content, v);
+    return v;
+  };
+  const originalKills = stored.filter((m) => histOf(m) !== null);
 
   // A guided row that is ALSO restatable: the guided lane is exempt from the
   // demotion, so it must still ride a tight budget. Added to every arm, equally.
@@ -309,19 +348,39 @@ try {
     original: GUIDED_DOC,
   } as unknown as Memory;
 
-  const arms: Record<string, Memory[]> = {
-    off: [...seeded, ...stored.map((m) => ({ ...m, tags: ["auto-capture"] }))],
-    tag: [...seeded, ...stored],
-    "delete-hardened": [
-      ...seeded,
-      ...stored.filter((m) => !m.tags?.includes(RESTATABLE_TAG)),
-    ],
-    "delete-original": [
-      ...seeded,
-      ...stored.filter((m) => hist.check(m.content) === null),
-    ],
-  };
-  for (const k of Object.keys(arms)) arms[k] = [...arms[k]!, guidedRow];
+  // Five arms, one background. `drop-at-read` is the P3 preview: the verdict is
+  // an EXCLUSION at read time rather than a demotion, so the row stays in the
+  // store and stays recallable by anything that reads the store, and simply never
+  // competes for a block slot. Whether that is worth building is P5's question,
+  // and it is measurable, so it is measured here rather than argued later.
+  const names = [
+    "off",
+    "tag",
+    "drop-at-read",
+    "delete-hardened",
+    "delete-original",
+  ] as const;
+  function armsWith(background: Memory[]): Record<string, Memory[]> {
+    const kept: Record<string, Memory[]> = {
+      off: stored.map((m) => ({ ...m, tags: ["auto-capture"] })),
+      tag: stored,
+      // Applied to the BACKGROUND too: a read-time drop would not know which rows
+      // capture wrote, and the seeded rows are restatable by the same check.
+      "drop-at-read": stored,
+      "delete-hardened": stored.filter(
+        (m) => !m.tags?.includes(RESTATABLE_TAG),
+      ),
+      "delete-original": stored.filter((m) => histOf(m) === null),
+    };
+    const out: Record<string, Memory[]> = {};
+    for (const k of Object.keys(kept))
+      out[k] = [...background, ...kept[k]!, guidedRow];
+    out["drop-at-read"] = out["drop-at-read"]!.filter(
+      (m) => m.ts === guidedRow.ts || !isRestatable(m),
+    );
+    return out;
+  }
+  const arms = armsWith(seeded);
 
   // --- scoring ---------------------------------------------------------------------
   //
@@ -339,6 +398,53 @@ try {
     q: `what does the widget-api doc say about ${d.split(" ").slice(2, 6).join(" ")}`,
     content: d,
   }));
+
+  // ── What can this harness score at all? ───────────────────────────────────
+  // The negative direction of the hit metric is pinned by the header-only budget:
+  // a hit can be missed. Nothing pinned that one can be FOUND, and the gap is not
+  // hypothetical — written without keyword sets, 12 of the 21 transport queries
+  // scored 0 against their own gold ALONE in an empty store. Seven still do with
+  // keywords present. Those queries report 0 in every arm at every budget, so
+  // every recall figure below is out of what is retrievable, not out of 21, and
+  // the ceiling is measured here rather than assumed by the reader.
+  const storeRows = new Map(buildStore(600).map((s) => [s.id, s]));
+  const solo = (content: string, i: number, kwId?: string): Memory =>
+    ({
+      ts: `2026-01-03T00:00:${String(i % 60).padStart(2, "0")}.000Z`,
+      type: "learning",
+      scope: "widget-api",
+      content,
+      status: "settled",
+      ...(kwId ? { kw: storeRows.get(kwId)?.kw } : {}),
+    }) as unknown as Memory;
+  const blindTransport: string[] = [];
+  for (const [i, q] of transportQueries.entries()) {
+    const gold = withCommand(byId.get(q.gold)!.content);
+    const { block } = await selectRelevant(
+      q.q,
+      30,
+      [solo(gold, i, q.gold)],
+      undefined,
+      undefined,
+      { budget: 100_000, guidedCap: 3 },
+    );
+    if (!block.includes(gold.slice(0, 60))) blindTransport.push(q.gold);
+  }
+  const blindDoc: string[] = [];
+  for (const [i, q] of documentedQueries.entries()) {
+    const { block } = await selectRelevant(
+      q.q,
+      30,
+      [solo(q.content, i)],
+      undefined,
+      undefined,
+      { budget: 100_000, guidedCap: 3 },
+    );
+    if (!block.includes(q.content.slice(0, 60)))
+      blindDoc.push(q.content.slice(0, 34));
+  }
+  const ceilingT = transportQueries.length - blindTransport.length;
+  const ceilingD = documentedQueries.length - blindDoc.length;
 
   const unlimited = await selectRelevant(
     transportQueries[0]!.q,
@@ -380,7 +486,7 @@ try {
       // on facts the tree states, which is the opposite of what it does.
       for (const m of rows) {
         if (m.ts === guidedRow.ts) continue;
-        if (verdict.get(m.ts) === null) continue;
+        if (verdictOf(m) === null) continue;
         const line = formatMemory(m);
         if (block.includes(line)) c.restatableBytes += line.length;
       }
@@ -388,6 +494,11 @@ try {
       if (process.env.AVAIL_DUMP && budget === Math.round(FULL * 0.4))
         console.log(`DUMP ${q.q.slice(0, 34)}\n${block}\n`);
     }
+    // Per BLOCK, not summed over queries. The column is labelled "bytes per
+    // block"; summing across every query produced a number that looked like a
+    // block size and was really twenty-one of them, which made the byte claim
+    // unreadable even while it stayed monotone across arms.
+    c.restatableBytes = Math.round(c.restatableBytes / transportQueries.length);
     for (const q of documentedQueries) {
       const { block } = await selectRelevant(
         q.q,
@@ -402,7 +513,6 @@ try {
     return c;
   }
 
-  const names = ["off", "tag", "delete-hardened", "delete-original"] as const;
   const grid = new Map<string, Map<number, Cell>>();
   for (const n of names) {
     const row = new Map<number, Cell>();
@@ -418,8 +528,7 @@ try {
   // shows. A deleted row is unreachable at EVERY budget: that is the whole cost
   // side of the delete arms, and it is invisible in any single-budget column.
   const restatableStored = (rows: Memory[]) =>
-    rows.filter((m) => m.ts !== guidedRow.ts && verdict.get(m.ts) !== null)
-      .length;
+    rows.filter((m) => m.ts !== guidedRow.ts && verdictOf(m) !== null).length;
   /** The same count restricted to rows THIS pass captured. */
   const capturedTs = new Set(stored.map((m) => m.ts));
   /**
@@ -435,9 +544,7 @@ try {
   const restatableCaptured = (rows: Memory[]) =>
     rows.filter(
       (m) =>
-        capturedTs.has(m.ts) &&
-        m.ts !== guidedRow.ts &&
-        verdict.get(m.ts) !== null,
+        capturedTs.has(m.ts) && m.ts !== guidedRow.ts && verdictOf(m) !== null,
     ).length;
   const transportStored = (rows: Memory[]) =>
     TRANSPORT.filter((g) =>
@@ -475,7 +582,7 @@ try {
   lines.push("## What each budget shows");
   lines.push("");
   lines.push(
-    "| budget | transport facts in block | restatable bytes in block | doc facts in block |",
+    "| budget | transport facts in block | restatable bytes per block (mean) | doc facts in block |",
   );
   lines.push("| ---: | ---: | ---: | ---: |");
   for (const f of FRACS) {
@@ -494,6 +601,18 @@ try {
       `that can physically hold the line, because at 15% the header plus the guided row exceeds the ` +
       `budget in every arm and that is arithmetic, not policy.`,
   );
+  lines.push("");
+  lines.push(
+    `**Ceiling.** ${ceilingT} of ${transportQueries.length} transport queries retrieve their own gold ` +
+      `when that gold is the ONLY row in the store, and ${ceilingD} of ${documentedQueries.length} doc ` +
+      `queries do. Every recall figure above is out of those ceilings, not out of ` +
+      `${transportQueries.length}: the best arm reaches ${Math.max(...names.map((n) => cell(n, FRACS[FRACS.length - 1]!).transportHits))}/${ceilingT} ` +
+      `retrievable, which is a different claim from ${Math.max(...names.map((n) => cell(n, FRACS[FRACS.length - 1]!).transportHits))}/${transportQueries.length}. ` +
+      `${blindTransport.length} curated pairs never retrieve their gold even with no competition at all ` +
+      `(${[...new Set(blindTransport)].join(", ")}); that is a scorer/dataset finding, reported here and ` +
+      `not this bench's to fix.`,
+  );
+  lines.push("");
   // The cost, stated by the harness rather than left for the reader to find in
   // the table. A demoted row that is the best answer to its own question loses
   // that slot to a better match — the tree states the fact, so the demotion is
@@ -514,6 +633,82 @@ try {
   );
   lines.push("");
 
+  // ── Does the win survive a different store size? ────────────────────────────
+  // One competitor count is one data point. The demotion only pays where the
+  // budget binds, and how hard it binds depends on how many ordinary rows are
+  // competing, so a claim measured at a single store size is a claim about that
+  // size. The budget is recomputed per size from that size's own unbudgeted
+  // block, or the sweep would silently test a tighter budget as the store grew.
+  const SIZES = [0, 30, 90, 180].filter((s) => s <= seeded.length);
+  const sweepFracs = [0.25, 0.4, 0.6];
+  interface SweepRow {
+    size: number;
+    full: number;
+    hits: Record<string, number[]>;
+  }
+  const sweep: SweepRow[] = [];
+  for (const size of SIZES) {
+    const a = armsWith(seeded.slice(0, size));
+    const unlimited = await selectRelevant(
+      transportQueries[0]!.q,
+      30,
+      a.tag!,
+      undefined,
+      undefined,
+      { budget: 100_000, guidedCap: 3 },
+    );
+    const full = unlimited.block.length;
+    const hits: Record<string, number[]> = {};
+    for (const n of names) {
+      const seen: number[] = [];
+      for (const f of sweepFracs)
+        seen.push((await scoreAt(a[n]!, Math.round(full * f))).transportHits);
+      hits[n] = seen;
+    }
+    sweep.push({ size, full, hits });
+  }
+  lines.push("## Does the win survive a different store size?");
+  lines.push("");
+  lines.push(
+    `Same ${candidates.length} captured rows, background resampled at ${SIZES.join("/")} rows; ` +
+      `budget recomputed per size (${sweep.map((s) => s.full).join("/")} bytes unbudgeted), ` +
+      `shown at ${sweepFracs.map((f) => `${Math.round(f * 100)}%`).join(", ")}. ` +
+      "Transport facts in block.",
+  );
+  lines.push("");
+  lines.push(`| background | ${names.join(" | ")} |`);
+  lines.push(`| ---: | ${names.map(() => "---:").join(" | ")} |`);
+  for (const s of sweep) {
+    lines.push(
+      `| ${s.size} | ${names.map((n) => s.hits[n]!.join("/")).join(" | ")} |`,
+    );
+  }
+  lines.push("");
+
+  // ── The case bank (P4) ──────────────────────────────────────────────────────
+  // Every adversarial case this matcher has been found guilty of, re-decided by
+  // the shipped check on every run. The unit tests pin behaviour one case at a
+  // time; this says whether the POPULATION of verdicts moved, because a single
+  // flipped verdict changes the tag rate and therefore every number above.
+  const bank = await runCaseBank(scratch);
+  const bankBad = bank.filter((b) => b.got !== b.expectTag);
+  lines.push("## Case bank: every adversarial verdict, re-decided");
+  lines.push("");
+  lines.push(
+    `${bank.length} (tree, candidate) pairs, one repo each, decided by the shipped ` +
+      `availabilityIndex. ${bank.filter((b) => b.expectTag).length} must tag, ` +
+      `${bank.filter((b) => !b.expectTag).length} must not.`,
+  );
+  lines.push("");
+  lines.push("| case | expect | got | found by |");
+  lines.push("| --- | --- | --- | --- |");
+  for (const b of bank) {
+    lines.push(
+      `| ${b.id} | ${b.expectTag ? "tag" : "keep"} | ${b.got ? (b.reason ?? "tag") : "keep"}${b.got === b.expectTag ? "" : " **MISMATCH**"} | ${b.source} |`,
+    );
+  }
+  lines.push("");
+
   const controls: string[] = [];
   const check = (ok: boolean, label: string) => {
     controls.push(`${ok ? "PASS" : "FAIL"} — ${label}`);
@@ -527,12 +722,14 @@ try {
   // mode this whole file exists to catch: a harness measuring something else.
   check(
     seeded.length > 0 &&
-      names.every(
-        (n) =>
-          JSON.stringify(nonCaptured(arms[n]!)) ===
-          JSON.stringify(expectedNonCaptured),
-      ),
-    `the background really competes: the ${seeded.length} seeded rows plus the guided control are the identical set in every arm (sizes ${names.map((n) => arms[n]!.length).join("/")}, differing only by captured rows the policy deletes) — RED if a filter drops them again`,
+      names
+        .filter((n) => n !== "drop-at-read")
+        .every(
+          (n) =>
+            JSON.stringify(nonCaptured(arms[n]!)) ===
+            JSON.stringify(expectedNonCaptured),
+        ),
+    `the background really competes: the ${seeded.length} seeded rows plus the guided control are the identical set in every storage arm (sizes ${names.map((n) => arms[n]!.length).join("/")} — drop-at-read is smaller on purpose, it filters at read time) — RED if a filter drops them again`,
   );
   // The historical baseline is only faithful while the vendored copy is the
   // historical module. Checked against the object, not against a remembered count.
@@ -636,7 +833,7 @@ try {
     neverBehind &&
       cell("tag", tight).transportHits >
         cell("delete-original", tight).transportHits,
-    `WIN vs the original rule: tag delivers ${cell("tag", tight).transportHits}/${transportQueries.length} transport facts at the binding budget, delete-original ${cell("delete-original", tight).transportHits}, and tag is never behind at any budget (${col("tag", "transportHits")} vs ${col("delete-original", "transportHits")}) — a deleted fact cannot be retrieved`,
+    `WIN vs the original rule: tag delivers ${cell("tag", tight).transportHits}/${ceilingT} retrievable transport facts (${transportQueries.length} asked) at the binding budget, delete-original ${cell("delete-original", tight).transportHits}, and tag is never behind at any budget (${col("tag", "transportHits")} vs ${col("delete-original", "transportHits")}) — a deleted fact cannot be retrieved`,
   );
   check(
     FRACS.every(
@@ -684,6 +881,54 @@ try {
     "prompt containment: every scripted fact really rode the capture prompt",
   );
 
+  // ── Controls for what this revision added ───────────────────────────────────
+  // The bank must be able to say BOTH things. A bank of only "must tag" cases
+  // passes on a check that tags everything; one of only "must not" passes on a
+  // check that tags nothing. Both polarities present is what makes the count
+  // mean anything at all.
+  check(
+    bank.length >= 12 &&
+      bank.filter((b) => b.expectTag).length >= 3 &&
+      bank.filter((b) => !b.expectTag).length >= 6,
+    `the case bank can say both things: ${bank.length} cases, ${bank.filter((b) => b.expectTag).length} must tag and ${bank.filter((b) => !b.expectTag).length} must not — RED if either polarity is emptied out`,
+  );
+  check(
+    bankBad.length === 0,
+    `the shipped matcher still decides every adversarial case: ${bank.length - bankBad.length}/${bank.length}${bankBad.length ? ` — DRIFTED: ${bankBad.map((b) => `${b.id} expected ${b.expectTag ? "tag" : "keep"}, got ${b.got ? "tag" : "keep"}`).join(" | ")}` : ""} — RED with the case named, so the veto that moved is readable from its "found by" column`,
+  );
+  // The defect this control was written for, found by writing it: `ts` is not
+  // unique — the 16 rows one pass writes land in the same millisecond — so the
+  // verdict map keyed on it handed every lookup the same answer, and
+  // `drop-at-read` deleted all 16 captured rows because six of them were
+  // restatable. Transport golds are NOT restatable, which is the entire premise
+  // of the tag policy, so an arm that drops them is scoring a bug, not a policy.
+  check(
+    transportStored(arms["drop-at-read"]!) === TRANSPORT.length &&
+      arms["drop-at-read"]!.length ===
+        arms.tag!.length -
+          [...arms.tag!].filter((m) => m.ts !== guidedRow.ts && isRestatable(m))
+            .length,
+    `a read-time drop removes exactly the restatable rows and nothing else: it keeps ${transportStored(arms["drop-at-read"]!)}/${TRANSPORT.length} transport facts and ${arms["drop-at-read"]!.length} of ${arms.tag!.length} rows — RED if a verdict is read from the wrong row, which is what a ts-keyed lookup does when a pass writes rows in one millisecond`,
+  );
+  check(
+    ceilingT > 0 && ceilingD > 0,
+    `the hit metric can score at all: ${ceilingT}/${transportQueries.length} transport and ${ceilingD}/${documentedQueries.length} doc queries retrieve their own gold alone${blindTransport.length ? ` — unretrievable golds: ${[...new Set(blindTransport)].join(", ")}` : ""} — RED if a family goes wholly blind, because a wholly blind family reports 0 in every arm and no other control would notice`,
+  );
+  check(
+    sweep.every((s) =>
+      sweepFracs.every(
+        (_, i) =>
+          s.hits.tag![i]! >= s.hits["delete-original"]![i]! &&
+          s.hits.tag![i]! >= s.hits["drop-at-read"]![i]!,
+      ),
+    ),
+    `the win is not an artefact of one store size: tag is at or above both delete-original and drop-at-read on transport facts at all ${SIZES.length} background sizes x ${sweepFracs.length} budgets (${sweep.map((s) => `${s.size}:${s.hits.tag!.join("/")}`).join(" ")})`,
+  );
+  check(
+    FRACS.every((f) => cell("drop-at-read", f).restatableBytes === 0),
+    `the P3 preview does what it claims: drop-at-read spends 0 block bytes on facts the tree states at every budget — and the transport column is the price (${col("drop-at-read", "transportHits")} vs tag ${col("tag", "transportHits")})`,
+  );
+
   lines.push("## Controls");
   lines.push("");
   for (const c of controls) lines.push(`- ${c}`);
@@ -709,6 +954,55 @@ try {
     maxRetries: 5,
     retryDelay: 20,
   });
+}
+
+/**
+ * Re-decide the case bank. One repo per case: sharing a tree would let a
+ * candidate match a DIFFERENT case's line and report a verdict for the wrong
+ * reason, which is the class of defect this file exists to keep out.
+ */
+async function runCaseBank(parent: string): Promise<
+  Array<{
+    id: string;
+    expectTag: boolean;
+    got: boolean;
+    reason: string;
+    source: string;
+  }>
+> {
+  const root = mkdtempSync(join(parent, "bank-"));
+  const out: Array<{
+    id: string;
+    expectTag: boolean;
+    got: boolean;
+    reason: string;
+    source: string;
+  }> = [];
+  for (const c of AVAILABILITY_CASES) {
+    const dir = join(root, c.id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "README.md"), c.tree);
+    const git = (...args: string[]) => {
+      const p = Bun.spawnSync(["git", "-C", dir, ...args], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      if (p.exitCode !== 0)
+        throw new Error(`git ${args.join(" ")}: ${p.stderr?.toString()}`);
+    };
+    git("init", "-q");
+    git("add", ".");
+    const v = availabilityIndex(dir).check(c.candidate);
+    out.push({
+      id: c.id,
+      expectTag: c.expectTag,
+      got: v !== null,
+      reason: v?.reason ?? "",
+      source: c.source,
+    });
+  }
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  return out;
 }
 
 /** Hits with a budget too small for a single line: the harness's own fuse. */
