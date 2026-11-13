@@ -22,6 +22,7 @@ import {
 import { quarantineCandidate } from "../store/quarantine/quarantine.ts";
 import { flattenMemoryText } from "../store/sanitize.ts";
 import { redactSecrets } from "../store/secrets.ts";
+import { availabilityIndex } from "./available.ts";
 import { parseCandidates, parseModelRef } from "./candidates.ts";
 import { claimVerdictFromContent } from "./checked.ts";
 import {
@@ -656,6 +657,15 @@ export function configureAutoCapture(
               c.original = undefined;
           }
         }
+        // #389: availability before authority. A candidate that restates a
+        // tracked file, or names a command the project already declares, is
+        // readable by the next session without a row — and capture costs about a
+        // third of a session's own generation. Built once per pass: one
+        // `git ls-files`, one shared byte budget. It REFUSES; it never deletes,
+        // so a row the store has always kept is untouched (criterion 6).
+        const available = availabilityIndex(
+          captureReader.kind === "repo" ? captureReader.scope.path : undefined,
+        );
         // S1 (learn-from-failure): a row that CITES a failing command is
         // claiming to be a lesson, and the claim is checked against the ledger,
         // not against the model's retelling. ReMe (Findings ACL 2026) found
@@ -701,6 +711,31 @@ export function configureAutoCapture(
           // Between candidates, never inside a gate run: a supersession that
           // half-applied is a store the next session cannot trust.
           if (controller.signal.aborted) return;
+          const avail = available.check(c.content);
+          if (avail) {
+            // Refused as restatable, not as wrong. A guided row can land here:
+            // if the user's words are verbatim in the tree, the tree answers
+            // them, and a row that contradicts the tree is by definition NOT
+            // verbatim in it, so the contradiction case still gets stored.
+            await record(
+              "auto_capture_available",
+              {
+                session: sid,
+                trigger,
+                type: c.type,
+                scope: redactSecrets(c.scope),
+                reason: avail.reason,
+                where: avail.where,
+                matched: avail.matched,
+                ...(c.guided ? { guided: true } : {}),
+                ...(modelTag ? { model: modelTag } : {}),
+              },
+              false,
+              sid,
+              captureGate.evidenceContext,
+            );
+            continue;
+          }
           // #393 AC 2: a numeric claim capture INFERRED (the user did not state
           // it) that names a constant the tree also names is checked before it
           // is stored. Only a contradiction refuses; "undecidable" is the
