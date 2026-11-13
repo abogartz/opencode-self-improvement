@@ -155,11 +155,14 @@ describe("capture availability gate (#389)", () => {
   });
 
   test("a command the project declares is refused, with the gate named", async () => {
+    // The bare mention is the case the manifest can actually answer. Prose
+    // riding the command is a claim the manifest does not make, so it is kept
+    // (#397 round 3); see the gate-claim test below.
     await capture(makeRepo("gate"), [
       {
         type: "pattern",
         scope: "release",
-        content: "Ship this repo with `npm run deploy` from the root.",
+        content: "Ship with `npm run deploy`.",
       },
     ]);
     const refused = evidence().filter((l) => l.ev === "auto_capture_available");
@@ -221,8 +224,9 @@ describe("capture availability gate (#389)", () => {
   });
 
   test("a restated clause carrying a SHORT new clause is kept (#397 round 2)", async () => {
-    // Review #397 (WhollyMindless): the new clause is below MIN_CLAUSE, so the
-    // old code dropped it from `needed` and refused on the old clause alone.
+    // Review #397 (WhollyMindless): the new clause is below the MIN_CLAUSE
+    // threshold this file used to split on, so the old code dropped it from
+    // `needed` and refused on the old clause alone.
     // A short clause can carry the entire new number.
     await capture(makeRepo("mixed-short"), [
       {
@@ -235,6 +239,68 @@ describe("capture availability gate (#389)", () => {
       evidence().filter((l) => l.ev === "auto_capture_available"),
     ).toHaveLength(0);
     expect((await rowsWith("mixed2")).length).toBe(1);
+  });
+
+  test("a declared command does not swallow a new behavioural fact (#397 round 3)", async () => {
+    // Review #397 (WhollyMindless): the residual left by the command strip was
+    // 26 characters and carried no restriction word, so its LENGTH alone was
+    // taken as proof of a restatement. The manifest declares that `deploy` runs
+    // `rsync dist/ box:/srv`. It says nothing about the staging database and
+    // nothing about Windows, and no list of condition words can cover what it
+    // does not say.
+    await capture(makeRepo("gate-claim"), [
+      {
+        type: "learning",
+        scope: "release5",
+        content: "`npm run deploy` wipes the staging database.",
+      },
+      {
+        type: "learning",
+        scope: "release6",
+        content: "`npm run deploy` fails on Windows; use WSL.",
+      },
+    ]);
+    expect(
+      evidence().filter((l) => l.ev === "auto_capture_available"),
+    ).toHaveLength(0);
+    expect((await rowsWith("release5")).length).toBe(1);
+    expect((await rowsWith("release6")).length).toBe(1);
+  });
+
+  test("a substring of the OPPOSITE rule is not a restatement (#397 round 3)", async () => {
+    // Review #397 (WhollyMindless): the clause lookup matched `Use tabs for
+    // indentation.` INSIDE `We do not use tabs for indentation.`. That is the
+    // worst failure this gate can have: it refuses the correction and keeps the
+    // doc's authority behind the reversed rule. A match now has to sit in a
+    // sentence of the same polarity — and the verbatim negated rule still
+    // refuses, so the guard did not simply switch the rule off.
+    const repo = join(fixture.root, "negated");
+    mkdirSync(repo, { recursive: true });
+    writeFileSync(
+      join(repo, "README.md"),
+      "We do not use tabs for indentation.\n",
+    );
+    git(repo, "init", "-q");
+    git(repo, "add", ".");
+    await capture(repo, [
+      {
+        type: "learning",
+        scope: "style",
+        content: "Use tabs for indentation.",
+        guided: true,
+      },
+      {
+        type: "learning",
+        scope: "style2",
+        content: "We do not use tabs for indentation.",
+      },
+    ]);
+    const refused = evidence().filter((l) => l.ev === "auto_capture_available");
+    expect(refused.length).toBe(1);
+    expect(String(refused[0].reason)).toBe("in_tracked_file");
+    expect(String(refused[0].scope)).toBe("style2");
+    expect((await rowsWith("style")).length).toBe(1);
+    expect((await rowsWith("style2")).length).toBe(0);
   });
 
   test("a fact that is nowhere in the tree is kept — this is the transport case", async () => {

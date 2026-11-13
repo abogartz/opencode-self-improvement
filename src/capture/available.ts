@@ -36,23 +36,38 @@ export type AvailabilityVerdict = {
   matched: string;
 };
 
-// Below this, a "verbatim" hit is coincidence: `the build is green` matches
-// anything. A restated doc sentence is normally longer than this.
-const MIN_CLAUSE = 48;
-// Below MIN_CLAUSE a clause cannot prove a restatement ON ITS OWN, but it is
-// still an assertion, and it is where a short new fact lives: `; External rate
-// is 1900` carries the whole number in 21 characters (#397 review,
-// WhollyMindless). So every clause above MIN_TRACE has to be found before the
-// candidate is refused. Below MIN_TRACE a clause is punctuation, not a claim.
+// Below this a clause is punctuation, not a claim: `the build is green` matches
+// anything. Above it a clause is an assertion, and that is where a short new
+// fact lives — `; External rate is 1900` carries the whole number in 21
+// characters (#397 review, WhollyMindless). So every clause above MIN_TRACE has
+// to be found before the candidate is refused.
 const MIN_TRACE = 16;
 
-// A condition on a command is information the project's gates do not carry: a
-// manifest declares THAT `deploy` exists, never when it may be run. Length is
-// not evidence here — "Never run `npm run deploy` without approval." is 27
-// characters and the whole fact is the condition (#397 review). Any word on
-// this list in the residual makes the candidate new, and it is kept.
-const RESTRICTION =
-  /\b(never|always|only|must|shall|should|may not|cannot|can't|do not|don't|not|avoid|forbid\w*|prohibit\w*|disallow\w*|without|unless|until|requir\w*|approval|approv\w*|permission|allow\w*|restrict\w*|gated|sign-?off|manually|twice|before|after|during|outside|inside|secret|token|credential|password|confirm\w*|verify\w*)\b/;
+// Assertion boundaries: the edges of the one sentence a match is judged inside.
+// The candidate is split on these, and the text in the tree is walked back to
+// them (#397 round 3). Code 0 is the joiner the scan puts between tracked
+// files, so a clause can never match across two of them.
+function isBoundary(code: number): boolean {
+  return (
+    code === 46 || // .
+    code === 59 || // ;
+    code === 58 || // :
+    code === 44 || // ,
+    code === 10 || // newline
+    code === 0 // the file joiner
+  );
+}
+
+// Words that reverse an assertion. This is deliberately NOT the RESTRICTION
+// list it replaces. That list tried to decide whether a candidate says anything
+// NEW, and an open vocabulary can never do that (#397 round 3, WhollyMindless):
+// any word left off the list reopens the class. This one answers one closed
+// question — does the sentence the tree states have the same POLARITY as the
+// clause matched inside it? `We do not use tabs` and `Use tabs` are not the
+// same assertion, and a gate that cannot tell them apart stores the reversal of
+// the rule it was reading.
+const NEGATION =
+  /\b(no|not|nor|never|none|cannot|can'?t|don'?t|doesn'?t|didn'?t|won'?t|isn'?t|aren'?t|without|lacks?|lacking|absent|avoid\w*|prohibit\w*|forbid\w*|disallow\w*|refrain\w*|refuses?|instead of|rather than)\b/;
 // The scan is bounded by bytes, not files: a monorepo's tracked list is huge and
 // the point is a cheap check, not an index. One capture pass already pays for a
 // model call, which costs far more than this.
@@ -253,6 +268,65 @@ function gateHit(spans: string[], gates: Gate[]): Gate | null {
   return null;
 }
 
+/**
+ * The assertions in a normalised text: what is left after splitting on the
+ * sentence boundaries, minus fragments too short to be a claim.
+ */
+function assertions(text: string): string[] {
+  return text
+    .split(/[.;:,\n]/)
+    .map((c) => c.trim())
+    .filter((c) => c.length >= MIN_TRACE);
+}
+
+/** The whole sentence around `start .. start+len`, walked out to the boundaries. */
+function sentenceAt(text: string, start: number, len: number): string {
+  let a = start;
+  while (a > 0 && !isBoundary(text.charCodeAt(a - 1))) a--;
+  let b = start + len;
+  while (b < text.length && !isBoundary(text.charCodeAt(b))) b++;
+  return text.slice(a, b);
+}
+
+/**
+ * Where the tree states `clause` as its own words, in a sentence of the same
+ * polarity. -1 means "not available".
+ *
+ * #397 round 3 (WhollyMindless): a bare `indexOf` matches INSIDE the opposite
+ * assertion. With `We do not use tabs for indentation.` in the README, the
+ * candidate `Use tabs for indentation.` was refused as available, so the store
+ * would have held the reversal of the rule the gate had just read. A hit now
+ * has to
+ *   - begin and end on a word boundary: `use tabs` is not a hit inside
+ *     `abuse tabs`; and
+ *   - sit in a sentence that shares the clause's polarity. Negation the tree
+ *     carries and the clause drops is a reversal, not a restatement.
+ * A reversed clause is not evidence of availability, and every uncertainty in
+ * this file keeps the candidate.
+ */
+function findClause(hay: string, clause: string): number {
+  const negated = NEGATION.test(clause);
+  for (let from = 0; ; ) {
+    const i = hay.indexOf(clause, from);
+    if (i < 0) return -1;
+    const before = i > 0 ? hay.charCodeAt(i - 1) : 32;
+    const after =
+      i + clause.length < hay.length ? hay.charCodeAt(i + clause.length) : 32;
+    if (
+      !/\w/.test(String.fromCharCode(before)) &&
+      !/\w/.test(String.fromCharCode(after)) &&
+      NEGATION.test(sentenceAt(hay, i, clause.length)) === negated
+    )
+      return i;
+    from = i + 1;
+  }
+}
+
+/** True when every assertion in `clauses` is restatable from `hay`. */
+function allRestatable(hay: string, clauses: string[]): boolean {
+  return hay !== "" && clauses.every((c) => findClause(hay, c) >= 0);
+}
+
 export interface AvailabilityIndex {
   /** Null means "cannot tell", which keeps the candidate. */
   check(content: string): AvailabilityVerdict | null;
@@ -325,39 +399,43 @@ export function availabilityIndex(
       //   - "Never run `npm run deploy` until finance confirms approval code
       //     BLUEBIRD" refused because the manifest declares `deploy`, although
       //     the restriction and the code appear nowhere.
-      // Refusal now requires the whole assertion to be restatable.
+      // Refusal requires EVERY assertion the candidate makes to be restatable.
       const whole = norm(content);
-      const clauses = whole
-        .split(/[.;:,\n]/)
-        .map((c) => c.trim())
-        .filter((c) => c.length >= MIN_TRACE);
-      const needed = clauses.length ? clauses : [whole];
-      if (haystack) {
-        const hits = needed.map((c) => haystack.indexOf(c));
-        if (hits.every((h) => h >= 0)) {
-          return {
-            reason: "in_tracked_file",
-            where: relative(repoDir, join(repoDir, fileAt(hits[0]!))) || "?",
-            matched: needed[0]!.slice(0, 120),
-          };
-        }
+      const needed = assertions(whole);
+      if (needed.length === 0) needed.push(whole);
+      const first = needed[0] ?? whole;
+      if (haystack && allRestatable(haystack, needed)) {
+        return {
+          reason: "in_tracked_file",
+          where:
+            relative(
+              repoDir,
+              join(repoDir, fileAt(findClause(haystack, first))),
+            ) || "?",
+          matched: first.slice(0, 120),
+        };
       }
-      // Declared gate: refuse only when the candidate says NOTHING BEYOND the
-      // command. Stripping every stated command span must leave less than a
-      // clause of prose, and that prose must carry no condition: a restriction,
-      // a window or a code is new information the manifest does not hold, and
-      // the row is kept however short it is (#397 review).
+      // Declared gate. #397 round 3 (WhollyMindless): a short residual used to
+      // count as a restatement on LENGTH alone, so "`npm run deploy` wipes the
+      // staging database." was refused against a manifest that says only that
+      // `deploy` runs rsync. Length and restriction vocabulary are both the
+      // wrong test — any list of condition words is open-ended, and the row is
+      // new whatever its length. The burden now sits where it belongs: refuse
+      // only when the candidate is POSITIVELY recognised as a restatement of
+      // the declaration, which means stripping the stated commands leaves either
+      // no assertion at all, or assertions the tracked files state themselves.
+      // Everything else is a claim the manifest does not make, and it is kept.
       const gate = gateHit(statedCommands(content), gates);
       if (gate) {
         let residual = content;
         for (const span of statedCommands(content))
           residual = residual.split(span).join(" ");
-        const rest = norm(residual);
-        if (rest.length < MIN_CLAUSE && !RESTRICTION.test(rest)) {
+        const claims = assertions(norm(residual));
+        if (claims.length === 0 || allRestatable(haystack, claims)) {
           return {
             reason: "declared_gate",
             where: gate.where,
-            matched: norm(content).slice(0, 120),
+            matched: whole.slice(0, 120),
           };
         }
       }
