@@ -69,7 +69,12 @@ import { availabilityIndex } from "../../src/capture/available.ts";
 import { availabilityIndex as historicalAvailabilityIndex } from "../fixtures/available-362655c.ts";
 import { selectRelevant } from "../../src/recall/relevant.ts";
 import { QUERY_STOPWORDS } from "../../src/recall/score.ts";
-import { buildStore, MEMORIES, QUERIES } from "../fixtures/recall-dataset.ts";
+import {
+  buildStore,
+  keywordsFor,
+  MEMORIES,
+  QUERIES,
+} from "../fixtures/recall-dataset.ts";
 import { AVAILABILITY_CASES } from "../fixtures/availability-cases.ts";
 import { loadPlugin } from "../../test/harness.ts";
 
@@ -227,17 +232,28 @@ try {
       .join("\n") + "\n",
   );
 
+  // The reply carries keyword lists, because the SHIPPED prompt asks for them
+  // ("kw: 3-5 search keywords for how a DIFFERENT session would ask for this",
+  // src/capture/prompt.ts) and the write path persists them
+  // (src/capture/candidates.ts `cleanKeywords`, src/capture/runtime.ts). A scripted
+  // reply without them is not the reply production makes, and the difference is not
+  // cosmetic: it moves the retrieval ceiling by five queries, which is what review
+  // round 4 (WhollyMindless) caught. The lists are the dataset's authored ones.
   const candidates = [
     ...DOCUMENTED.map((content) => ({
       type: "learning",
       scope: "widget-api",
       content,
     })),
-    ...TRANSPORT.map((m) => ({
-      type: m.type,
-      scope: m.scope,
-      content: withCommand(m.content),
-    })),
+    ...TRANSPORT.map((m) => {
+      const kw = keywordsFor(m.id);
+      return {
+        type: m.type,
+        scope: m.scope,
+        content: withCommand(m.content),
+        ...(kw && kw.length ? { kw } : {}),
+      };
+    }),
   ];
 
   const plugin = await loadPlugin(repo, {
@@ -532,8 +548,19 @@ try {
     },
     (q) => goldOf(q).slice(0, 60),
   );
-  const blindAuthoredKw = await blindAgainst(
-    (q, i) => solo(goldOf(q), i, q.gold),
+  // The counterfactual is now the keyword-FREE row, because that is the variation
+  // production can actually produce: the prompt says "Omit (or []) when the content
+  // already uses those words". So the second ceiling measures what a capture reply
+  // without keywords would score, on the same rows.
+  const blindNoKw = await blindAgainst(
+    (q, i) => {
+      const row = exactRowFor(q.gold);
+      return {
+        ...row,
+        kw: [],
+        ts: `2026-01-03T12:00:${String(i % 60).padStart(2, "0")}.000Z`,
+      } as Memory;
+    },
     (q) => goldOf(q).slice(0, 60),
   );
   const blindDoc: string[] = [];
@@ -550,7 +577,7 @@ try {
       blindDoc.push(q.content.slice(0, 34));
   }
   const ceilingT = transportQueries.length - blindExact.length;
-  const ceilingKw = transportQueries.length - blindAuthoredKw.length;
+  const ceilingNoKw = transportQueries.length - blindNoKw.length;
   const ceilingD = documentedQueries.length - blindDoc.length;
 
   const unlimited = await selectRelevant(
@@ -716,14 +743,15 @@ try {
       `out of those, not out of ${transportQueries.length} — the best arm reaches ` +
       `${Math.max(...names.map((n) => cell(n, FRACS[FRACS.length - 1]!).transportHits))}/${ceilingT}, ` +
       `which is ${Math.max(...names.map((n) => cell(n, FRACS[FRACS.length - 1]!).transportHits)) === ceilingT ? "at the achievable ceiling" : "below it"}. ` +
-      `A SECOND ceiling is reported because the two are not the same number: give the same golds the ` +
-      `dataset's authored keywords and ${ceilingKw}/${transportQueries.length} retrieve, because ` +
-      `${ceilingKw - ceilingT} of the ${blindExact.length} blind queries turn retrievable on keywords ` +
-      `alone. The captured rows carry none (${capturedWithKw} of ${stored.length}), because the scripted ` +
-      `capture reply emits none — a property of this fixture, stated rather than assumed. ` +
-      `${[...new Set(blindExact)].join(", ")} are unretrievable on the rows the arms hold, and ` +
-      `${[...new Set(blindAuthoredKw)].join(", ")} of them stay unretrievable even with authored ` +
-      `keywords — those are the scorer/dataset finding (#405), reported here and not this bench's to fix.`,
+      `The counterfactual is reported beside it, because the prompt lets the model omit keywords ("Omit ` +
+      `(or []) when the content already uses those words") and that choice is measurable: strip the ` +
+      `${capturedWithKw} keyword lists the reply carried and the ceiling falls to ` +
+      `${ceilingNoKw}/${transportQueries.length}. Keywords are load-bearing for ` +
+      `${ceilingT - ceilingNoKw} of these pairs, not decoration. ` +
+      `${[...new Set(blindExact)].join(", ")} is unretrievable either way — that is the scorer/dataset ` +
+      `finding (#405), reported here and not this bench's to fix. Omitting keywords adds ` +
+      `${[...new Set(blindNoKw.filter((x) => !blindExact.includes(x)))].join(", ") || "nothing"} to ` +
+      `that list.`,
   );
   lines.push("");
   // The cost, stated by the harness rather than left for the reader to find in
@@ -1084,7 +1112,7 @@ try {
           s.hits.tag![i]! >= s.hits["drop-at-read"]![i]!,
       ),
     ),
-    `the win is not an artefact of one store size: tag is at or above both delete-original and drop-at-read on transport facts at all ${SIZES.length} background sizes x ${sweepFracs.length} budgets (${sweep.map((s) => `${s.size}:${s.hits.tag!.join("/")}`).join(" ")})`,
+    `the win is not an artefact of one store size: tag is at or above both delete-original and drop-at-read on transport facts at all ${SIZES.length} background sizes x ${sweepFracs.length} budgets (${sweep.map((s) => `${s.size}:${s.hits.tag!.join("/")}`).join(" ")}) — and note what this sweep can and cannot show now: with keyword-bearing rows the transport column saturates at the ceiling for every arm that keeps its rows, so the sweep's work here is proving the DELETE arms' loss is size-independent (${sweep.map((s) => `${s.size}:${s.hits["delete-original"]!.join("/")}`).join(" ")}), not that tag wins by a margin that varies with store size`,
   );
   check(
     FRACS.every((f) => cell("drop-at-read", f).restatableBytes === 0),
