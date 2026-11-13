@@ -6,7 +6,7 @@ import { readerFromSid, visibleTo } from "../store/model/visibility.ts";
 import { FRAME } from "../inject/budget.ts";
 import { formatMemory } from "../inject/format.ts";
 import { conflictLine, findConstant, valuesAgree } from "./conflicts.ts";
-import { USER_GUIDED_TAG } from "../core/tags.ts";
+import { RESTATABLE_TAG, USER_GUIDED_TAG } from "../core/tags.ts";
 import { cmpTs } from "../core/cmp-ts.ts";
 import { scoreMemories } from "./score.ts";
 
@@ -86,6 +86,21 @@ export interface SelectOptions {
 /** Row carries the hint-channel tag (written by capture for user-stated facts). */
 export function isUserGuided(m: Memory): boolean {
   return m.tags?.includes(USER_GUIDED_TAG) === true;
+}
+
+/**
+ * #402: the working tree already states this fact. Such a row is STORED (it used
+ * to be dropped at capture, which is the defect #402 exists for), but it is the
+ * first thing a tight injection budget gives up: the next session can read it in
+ * the file, so a slot spent on it is a slot not spent on something the files do
+ * not hold.
+ *
+ * The guided lane is exempt. A user-stated row outranks an inferred one in this
+ * codebase everywhere, and capture tags guided rows too when their words are
+ * verbatim in the tree.
+ */
+export function isRestatable(m: Memory): boolean {
+  return m.tags?.includes(RESTATABLE_TAG) === true;
 }
 
 // Hint-channel caveat (#345). Measured: a WRONG user-guided row ("free
@@ -197,7 +212,22 @@ export async function selectRelevant(
     // `shown` returns exactly what an explicit header check would.
     let used = fitHeader.length;
     shown = [];
-    for (let i = 0; i < lines.length; i++) {
+    // #402: PRIORITY decides who rides, and a restatement now sits last in that
+    // order — the tree already states it, so a slot spent here is a slot not
+    // spent on something the files do not hold. `merged` stays in score order:
+    // `selected` is the ledger's view of the ranking and a miss has to stay
+    // diagnosable, so the demotion is a separate WALK order, never a re-sort of
+    // the selection. The guided lane is exempt: a user-stated row outranks an
+    // inferred one in this codebase everywhere.
+    const demoted = (m: Memory | undefined): boolean =>
+      !!m && !guided.includes(m) && isRestatable(m);
+    const fitOrder = merged
+      .map((_, i) => i)
+      .sort(
+        (a, b) =>
+          (demoted(merged[a]) ? 1 : 0) - (demoted(merged[b]) ? 1 : 0) || a - b,
+      );
+    for (const i of fitOrder) {
       const line = lines[i] ?? "";
       if (used + 1 + line.length > budget) continue;
       shown.push(i);

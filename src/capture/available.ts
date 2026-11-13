@@ -16,9 +16,29 @@
 //   2. Is this command already declared by the project's own gates? A row that
 //      says "run `make deploy`" is answered by the Makefile.
 //
-// Both REFUSE. Neither deletes: the caller drops a candidate BEFORE the write
-// gate, so a row the store has always kept is never touched (criterion 6, the
-// same monotonicity rule S1 shipped under).
+// Both produce a TAG, not a refusal (#402). Four adversarial review rounds on
+// #397 each found the same defect — text that was merely short or partly matched
+// was read as already known — and each round patched one instance. Measured
+// against this repo's live store: the original rule refused 30 of 1166 real
+// captured rows and 29 of those were wrong (the note "OpenCode V2 (v2.0.26) does
+// NOT run LSP servers" was refused because it contained the string `bun test` and
+// this project declares a `test` script). The hardened rule refuses 0 of 1166. A
+// check nobody can trust enough to delete with, and nobody can make cheap enough
+// to skip, must not decide anything on its own.
+//
+// So the verdict is now evidence attached to a row that is stored anyway:
+//
+//   - it cannot drop a row, so a wrong match costs a tag instead of a fact;
+//   - every claim is checked, not sampled: one unchecked clause is enough to make
+//     the row new, and the unchecked part is where the new fact lives;
+//   - polarity and numbers are VETOES, not evidence: they can only decline to
+//     tag, never create one. The number check is the house `numericTokens` set
+//     from `core/tokenize.ts`; see the two vetoes below for why the polarity
+//     check keeps its own cue list as well.
+//
+// The vetoes can only REMOVE a tag, never add one. Saltzer & Schroeder's
+// fail-safe principle, applied to a suppression filter: the default is keep, and
+// a bug must surface as a visible duplicate rather than as content that is gone.
 //
 // Fail-open is the rule throughout. A missing git, an unreadable file, a repo
 // that is not a repo, or a budget that ran out is NOT evidence that a fact is
@@ -26,8 +46,9 @@
 // measured benefit capture has. Every uncertainty keeps the candidate.
 import { lstatSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { POL_NEG, numericTokens, polaritySigns } from "../core/tokenize.ts";
 
-/** What made a candidate available, and where the next session can get it. */
+/** What made a candidate restatable, and where the next session can get it. */
 export type AvailabilityVerdict = {
   reason: "in_tracked_file" | "declared_gate";
   /** Repo-relative file, or the gate's location (`package.json scripts.test`). */
@@ -153,6 +174,45 @@ function isBoundary(code: number): boolean {
 // the rule it was reading.
 const NEGATION =
   /\b(no|not|nor|never|none|cannot|can'?t|don'?t|doesn'?t|didn'?t|won'?t|isn'?t|aren'?t|without|lacks?|lacking|absent|avoid\w*|prohibit\w*|forbid\w*|disallow\w*|refrain\w*|refuses?|instead of|rather than)\b/;
+
+/**
+ * VETO 1 (#402): is this sentence reversed?
+ *
+ * Two sources, unioned, because they answer different questions and the union is
+ * strictly the safer one:
+ *
+ *   - `NEGATION`, the cue list: "we do NOT use tabs" is negated prose.
+ *   - `core/tokenize.ts`'s `polaritySigns`, which is NOT a negation detector and
+ *     must not be used as one. It extracts the SIGNED PREDICATES a text asserts
+ *     for the contradiction surface, so "we do not use tabs" returns `[]` —
+ *     `use` is not a table term. Substituting it for the cue list would have
+ *     compared `[]` with `[]`, matched, and re-opened the exact round-3 defect
+ *     this regex was written to close. What it adds here is the part a cue list
+ *     cannot see: the antonym pairs and the dual-role "never", so "must never
+ *     disable" and "enable" do not read as the same claim.
+ *
+ * Both sides of the union can only REMOVE a tag, and since #402 a removed tag
+ * costs nothing: the row is stored either way.
+ */
+function negated(text: string): boolean {
+  return NEGATION.test(text) || polaritySigns(text).includes(POL_NEG);
+}
+
+/**
+ * VETO 2 (#402): a figure the matched declaration does not carry.
+ *
+ * `core/tokenize.ts` states the rule and `store/tombstones/tombstone.ts`
+ * measures it on this repo's own data: a correction scores HIGHER than an honest
+ * rewording, so overlap alone cannot separate "the same fact again" from "the
+ * fact has changed". On the declared-command path the manifest states only that
+ * a command exists, so any number the row asserts has to be in the command
+ * itself or the row is new.
+ */
+function introducesNewNumber(text: string, matched: string): boolean {
+  const known = new Set(numericTokens(matched));
+  for (const n of numericTokens(text)) if (!known.has(n)) return true;
+  return false;
+}
 // The scan is bounded by bytes, not files: a monorepo's tracked list is huge and
 // the point is a cheap check, not an index. One capture pass already pays for a
 // model call, which costs far more than this.
@@ -377,6 +437,29 @@ function claims(text: string): string[] {
   return out;
 }
 
+/**
+ * Does a sentence that states one of `commands` also FORBID it? Judged on those
+ * sentences alone: the manifest says a command exists, so "Never run `x`" is a
+ * claim the manifest does not make, while a prohibition in an unrelated clause is
+ * that clause's business and the claim check handles it.
+ *
+ * The bare words are here because `polaritySigns` reads `never` as a modifier
+ * that needs a verb, and "Never `npm run deploy`." has the verb inside a code
+ * span. A closed list, answering one closed question, over a decision that can
+ * now only decline to tag.
+ */
+function forbidsCommand(content: string, commands: string[]): boolean {
+  for (const sentence of content.split(/[.;:\n]+/)) {
+    if (!commands.some((c) => sentence.includes(c))) continue;
+    if (
+      negated(sentence) ||
+      /\b(never|avoid\w*|prohibit\w*|forbid\w*)\b/i.test(sentence)
+    )
+      return true;
+  }
+  return false;
+}
+
 /** The whole sentence around `start .. start+len`, walked out to the boundaries. */
 function sentenceAt(text: string, start: number, len: number): string {
   let a = start;
@@ -403,7 +486,7 @@ function sentenceAt(text: string, start: number, len: number): string {
  * this file keeps the candidate.
  */
 function findClause(hay: string, clause: string): number {
-  const negated = NEGATION.test(clause);
+  const reversed = negated(clause);
   for (let from = 0; ; ) {
     const i = hay.indexOf(clause, from);
     if (i < 0) return -1;
@@ -413,7 +496,7 @@ function findClause(hay: string, clause: string): number {
     if (
       !/\w/.test(String.fromCharCode(before)) &&
       !/\w/.test(String.fromCharCode(after)) &&
-      NEGATION.test(sentenceAt(hay, i, clause.length)) === negated
+      negated(sentenceAt(hay, i, clause.length)) === reversed
     )
       return i;
     from = i + 1;
@@ -426,10 +509,20 @@ function allRestatable(hay: string, clauses: string[]): boolean {
 }
 
 export interface AvailabilityIndex {
-  /** Null means "cannot tell", which keeps the candidate. */
+  /** Null means "cannot tell", which stores the row with no tag. */
   check(content: string): AvailabilityVerdict | null;
-  /** For evidence: whether the tree scan ran at all. */
-  scanned(): { files: number; bytes: number; tracked: boolean };
+  /**
+   * For evidence: what the tree scan actually read. `capped` means the byte
+   * budget ran out before the tracked list did. It is telemetry only, never a
+   * verdict input: both rules assert PRESENCE ("the tree states this"), so a
+   * truncated scan can only lower the tag rate, never raise a false tag.
+   */
+  scanned(): {
+    files: number;
+    bytes: number;
+    tracked: boolean;
+    capped: boolean;
+  };
 }
 
 /**
@@ -442,14 +535,14 @@ export function availabilityIndex(
   if (!repoDir) {
     return {
       check: () => null,
-      scanned: () => ({ files: 0, bytes: 0, tracked: false }),
+      scanned: () => ({ files: 0, bytes: 0, tracked: false, capped: false }),
     };
   }
   const files = listed(repoDir);
   if (files === null) {
     return {
       check: () => null,
-      scanned: () => ({ files: 0, bytes: 0, tracked: false }),
+      scanned: () => ({ files: 0, bytes: 0, tracked: false, capped: false }),
     };
   }
   const gates = parseGates(repoDir, files);
@@ -467,8 +560,12 @@ export function availabilityIndex(
   const slices: Slice[] = [];
   let bytes = 0;
   let loaded = 0;
+  let capped = false;
   for (const file of ranked) {
-    if (bytes >= TOTAL_CAP) break;
+    if (bytes >= TOTAL_CAP) {
+      capped = true;
+      break;
+    }
     const text = readTracked(repoDir, file);
     if (text === null) continue;
     const n = norm(text);
@@ -497,7 +594,7 @@ export function availabilityIndex(
       //   - "Never run `npm run deploy` until finance confirms approval code
       //     BLUEBIRD" refused because the manifest declares `deploy`, although
       //     the restriction and the code appear nowhere.
-      // Refusal requires EVERY assertion the candidate makes to be restatable.
+      // A tag requires EVERY assertion the candidate makes to be restatable.
       const whole = norm(content);
       const needed = claims(whole);
       if (needed.length === 0) needed.push(whole);
@@ -523,7 +620,7 @@ export function availabilityIndex(
       //     refused with the undeclared AWS prerequisite erased from the row;
       //   - an EMPTY claim list counted as proof, so "Never `npm run deploy`."
       //     refused with its only claim — `never` — dropped as too short.
-      // Refusal now needs all three, each positively established:
+      // A gate tag needs all three, each positively established:
       //   1. every command span the row states is declared. An undeclared one is
       //      a fact the tree does not hold, whatever the rest of the row says;
       //   2. what survives stripping them is nothing but FILLER — the bare
@@ -533,6 +630,18 @@ export function availabilityIndex(
       const spans = statedCommands(content);
       const gate = gateHit(spans, gates);
       if (gate) {
+        // VETOES (#402). The manifest states that a command EXISTS. It does not
+        // state that the command is safe, allowed, or finished, and it carries
+        // no figure. So a sentence that forbids the command, or a number the
+        // command does not carry, is a claim the declaration cannot answer.
+        //
+        // These can only REMOVE a tag, and since #402 a removed tag costs
+        // nothing: the row is stored either way. That is the whole point of the
+        // change — the round-3 and round-4 arguments were really about a
+        // vocabulary that had to be perfect because a miss deleted a fact. Under
+        // a tag, a miss costs one row.
+        if (forbidsCommand(content, spans)) return null;
+        if (introducesNewNumber(content, spans.join(" "))) return null;
         const undeclared = spans.some((s) => gateHit([s], gates) === null);
         let residual = content;
         for (const span of spans) residual = residual.split(span).join(" ");
@@ -550,6 +659,6 @@ export function availabilityIndex(
       }
       return null;
     },
-    scanned: () => ({ files: loaded, bytes, tracked: true }),
+    scanned: () => ({ files: loaded, bytes, tracked: true, capped }),
   };
 }

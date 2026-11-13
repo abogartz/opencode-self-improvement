@@ -6,6 +6,7 @@ import { session, setCurrent } from "../core/state.ts";
 import {
   AUTO_CAPTURE_TAG,
   CODE_CHECKED_TAG,
+  RESTATABLE_TAG,
   USER_GUIDED_TAG,
 } from "../core/tags.ts";
 import { record, recordCaptureLag } from "../evidence/record.ts";
@@ -22,7 +23,7 @@ import {
 import { quarantineCandidate } from "../store/quarantine/quarantine.ts";
 import { flattenMemoryText } from "../store/sanitize.ts";
 import { redactSecrets } from "../store/secrets.ts";
-import { availabilityIndex } from "./available.ts";
+import { type AvailabilityIndex, availabilityIndex } from "./available.ts";
 import { parseCandidates, parseModelRef } from "./candidates.ts";
 import { claimVerdictFromContent } from "./checked.ts";
 import {
@@ -660,12 +661,28 @@ export function configureAutoCapture(
         // #389: availability before authority. A candidate that restates a
         // tracked file, or names a command the project already declares, is
         // readable by the next session without a row — and capture costs about a
-        // third of a session's own generation. Built once per pass: one
-        // `git ls-files`, one shared byte budget. It REFUSES; it never deletes,
-        // so a row the store has always kept is untouched (criterion 6).
-        const available = availabilityIndex(
-          captureReader.kind === "repo" ? captureReader.scope.path : undefined,
-        );
+        // third of a session's own generation.
+        //
+        // #402 P0: built on FIRST USE, not on every pass. The build is a
+        // synchronous `git ls-files` plus a read of every tracked text file —
+        // measured here at 108 ms for 218 files and 2.11 MB — and the pass that
+        // needs it least is the one that used to pay for it: a model answer of
+        // `[]` still scanned the tree. One build per pass is kept, so the cost is
+        // now bounded by the candidates that exist.
+        let availableIndex: AvailabilityIndex | undefined;
+        let availableMs = 0;
+        const availability = (): AvailabilityIndex => {
+          if (!availableIndex) {
+            const t0 = Date.now();
+            availableIndex = availabilityIndex(
+              captureReader.kind === "repo"
+                ? captureReader.scope.path
+                : undefined,
+            );
+            availableMs = Date.now() - t0;
+          }
+          return availableIndex;
+        };
         // S1 (learn-from-failure): a row that CITES a failing command is
         // claiming to be a lesson, and the claim is checked against the ledger,
         // not against the model's retelling. ReMe (Findings ACL 2026) found
@@ -682,6 +699,8 @@ export function configureAutoCapture(
         // recall loss here.
         let lessonsKept = 0;
         let lessonsRefused = 0;
+        // #402: rows tagged `restatable` this pass. Counted, never dropped.
+        let restatements = 0;
         candidates = candidates.filter((c) => {
           if (c.failure === undefined) return true;
           const cite = normWs(c.failure).toLowerCase();
@@ -711,14 +730,23 @@ export function configureAutoCapture(
           // Between candidates, never inside a gate run: a supersession that
           // half-applied is a store the next session cannot trust.
           if (controller.signal.aborted) return;
-          const avail = available.check(c.content);
+          // #402: the availability verdict TAGS the row. It used to `continue`
+          // past the write, and that is the defect #402 exists for. A lexical
+          // match was never strong enough to delete a fact — 29 of the 30 rows
+          // the first version refused were new facts, and a silently dropped
+          // candidate leaves no trace to recover from.
+          //
+          // The row now goes through the same write gate as every other row, and
+          // the tag is what retrieval acts on: `restatable` rows sort last, so a
+          // full injection block gives them up first and a spare one keeps them.
+          // A wrong verdict costs one row. A right one saves a slot. That is the
+          // first version of this where the two error directions are both
+          // survivable, which is why four rounds of patches could not produce it.
+          const avail = availability().check(c.content);
           if (avail) {
-            // Refused as restatable, not as wrong. A guided row can land here:
-            // if the user's words are verbatim in the tree, the tree answers
-            // them, and a row that contradicts the tree is by definition NOT
-            // verbatim in it, so the contradiction case still gets stored.
+            restatements++;
             await record(
-              "auto_capture_available",
+              "auto_capture_restatable",
               {
                 session: sid,
                 trigger,
@@ -727,6 +755,10 @@ export function configureAutoCapture(
                 reason: avail.reason,
                 where: avail.where,
                 matched: avail.matched,
+                // The whole candidate, so the audit line alone can rebuild a row
+                // a later consolidation drops. Redacted first, as every other
+                // capture line does.
+                content: redactSecrets(c.content),
                 ...(c.guided ? { guided: true } : {}),
                 ...(modelTag ? { model: modelTag } : {}),
               },
@@ -734,7 +766,6 @@ export function configureAutoCapture(
               sid,
               captureGate.evidenceContext,
             );
-            continue;
           }
           // #393 AC 2: a numeric claim capture INFERRED (the user did not state
           // it) that names a constant the tree also names is checked before it
@@ -788,6 +819,8 @@ export function configureAutoCapture(
                 ...(original ? { original } : {}),
                 tags: [
                   AUTO_CAPTURE_TAG,
+                  // #402: the tree states this too. Stored anyway, sorted last.
+                  ...(avail ? [RESTATABLE_TAG] : []),
                   // #393: the ONE case that earns `[code-checked]` — an inferred
                   // numeric claim that agreed with the tree. Absent everywhere
                   // else, which is what makes `[unverified]` mean something
@@ -871,6 +904,30 @@ export function configureAutoCapture(
               /* fail-soft — see above */
             }
           }
+        }
+        // #402 P0: the scan is now visible in the trail. `scanned()` shipped
+        // "for evidence" and was never called, so a synchronous tree read ran
+        // every pass with no record that it happened. One line per pass that
+        // actually built the index, naming files, bytes and milliseconds.
+        if (availableIndex) {
+          const scan = availableIndex.scanned();
+          await record(
+            "auto_capture_scan",
+            {
+              session: sid,
+              trigger,
+              files: scan.files,
+              bytes: scan.bytes,
+              ms: availableMs,
+              tracked: scan.tracked,
+              capped: scan.capped,
+              restatements,
+              ...(modelTag ? { model: modelTag } : {}),
+            },
+            false,
+            sid,
+            captureGate.evidenceContext,
+          );
         }
         await recordCaptureLag(
           sid,
