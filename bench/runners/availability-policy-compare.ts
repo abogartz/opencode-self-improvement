@@ -60,6 +60,7 @@ import { resetState } from "../../src/core/state.ts";
 import { setRepoScope } from "../../src/identity/repokey.ts";
 import { formatMemory } from "../../src/inject/format.ts";
 import { availabilityIndex } from "../../src/capture/available.ts";
+import { availabilityIndex as historicalAvailabilityIndex } from "../fixtures/available-362655c.ts";
 import { selectRelevant } from "../../src/recall/relevant.ts";
 import { buildStore, MEMORIES, QUERIES } from "../fixtures/recall-dataset.ts";
 import { loadPlugin } from "../../test/harness.ts";
@@ -149,28 +150,15 @@ function makeRepo(dir: string): void {
   git("add", ".");
 }
 
-// --- the `362655c` reproduction ----------------------------------------------------
+// --- the `362655c` baseline ----------------------------------------------------------
 //
-// The original check opened with `if (gate) return refuse` and no residual test:
-// stating a declared command WAS the verdict. Reproduced here, and pinned by
-// control 3, because the module that did it no longer exists in src.
-function originalRuleRefuses(content: string): boolean {
-  const spans = [...content.matchAll(/`([^`\n]{2,60})`/g)]
-    .map((m) => (m[1] ?? "").trim())
-    .filter(Boolean);
-  const runner =
-    /^(?:bun(?:x| run)?|npm (?:run|exec)|pnpm (?:run|exec)|yarn|make|task)\s+/;
-  return spans.some((s) => {
-    const forms = [s.toLowerCase(), s.toLowerCase().replace(runner, "")];
-    return forms.some((f) =>
-      SCRIPTS.some((g) =>
-        g.includes(" ")
-          ? f === g || f.startsWith(`${g} `)
-          : f === g || f.split(" ")[0] === g,
-      ),
-    );
-  });
-}
+// Not reproduced by hand. An earlier revision of this runner carried a local
+// approximation that looked only for declared commands; the module that actually
+// shipped also refuses `in_tracked_file` matches, and against this fixture the
+// approximation refused 4 candidates where the real rule refuses 10 (#403 review
+// round 2). The arm therefore loads `bench/fixtures/available-362655c.ts`, a pinned
+// copy of the historical module, and a control below asserts that copy still
+// matches the git object.
 
 // --- run the one capture pass -------------------------------------------------------
 
@@ -287,13 +275,27 @@ try {
         console.log(`DUMP EV: ${l.slice(0, 240)}`);
   }
 
-  // Verdicts from the SHIPPED check, over the shipped rows.
+  // The seeded background, read back from the store rather than from the fixture
+  // builder, so the rows scored are the rows a session would really see. They are
+  // identical in every arm: the arms differ only in the availability policy.
+  const seeded = (await loadAll()).filter(
+    (m) => isActive(m) && !m.tags?.includes("auto-capture"),
+  );
+
+  // Verdicts from the SHIPPED check, over every row selection sees — captured rows
+  // AND background. Scoring only the captured rows would hide restatable bytes that
+  // a real block spends on ordinary memory.
   const idx = availabilityIndex(repo);
-  const verdict = new Map(stored.map((m) => [m.ts, idx.check(m.content)]));
+  const verdict = new Map(
+    [...stored, ...seeded].map((m) => [m.ts, idx.check(m.content)]),
+  );
   const tagged = stored.filter((m) => m.tags?.includes(RESTATABLE_TAG));
   /** Restatable by the shipped check, independent of what each arm stored. */
   const isRestatable = (m: Memory): boolean => verdict.get(m.ts) !== null;
-  const originalKills = stored.filter((m) => originalRuleRefuses(m.content));
+
+  // The historical rule, replayed by the module that shipped it.
+  const hist = historicalAvailabilityIndex(repo);
+  const originalKills = stored.filter((m) => hist.check(m.content) !== null);
 
   // A guided row that is ALSO restatable: the guided lane is exempt from the
   // demotion, so it must still ride a tight budget. Added to every arm, equally.
@@ -308,10 +310,16 @@ try {
   } as unknown as Memory;
 
   const arms: Record<string, Memory[]> = {
-    off: stored.map((m) => ({ ...m, tags: ["auto-capture"] })),
-    tag: stored,
-    "delete-hardened": stored.filter((m) => !m.tags?.includes(RESTATABLE_TAG)),
-    "delete-original": stored.filter((m) => !originalRuleRefuses(m.content)),
+    off: [...seeded, ...stored.map((m) => ({ ...m, tags: ["auto-capture"] }))],
+    tag: [...seeded, ...stored],
+    "delete-hardened": [
+      ...seeded,
+      ...stored.filter((m) => !m.tags?.includes(RESTATABLE_TAG)),
+    ],
+    "delete-original": [
+      ...seeded,
+      ...stored.filter((m) => hist.check(m.content) === null),
+    ],
   };
   for (const k of Object.keys(arms)) arms[k] = [...arms[k]!, guidedRow];
 
@@ -412,6 +420,25 @@ try {
   const restatableStored = (rows: Memory[]) =>
     rows.filter((m) => m.ts !== guidedRow.ts && verdict.get(m.ts) !== null)
       .length;
+  /** The same count restricted to rows THIS pass captured. */
+  const capturedTs = new Set(stored.map((m) => m.ts));
+  /**
+   * Everything in an arm that this pass did NOT capture, in a stable order. Equal
+   * across arms by construction, so any difference is a filter bug.
+   */
+  const nonCaptured = (rows: Memory[]) =>
+    rows
+      .filter((m) => !capturedTs.has(m.ts))
+      .map((m) => m.ts)
+      .sort();
+  const expectedNonCaptured = [...seeded.map((m) => m.ts), guidedRow.ts].sort();
+  const restatableCaptured = (rows: Memory[]) =>
+    rows.filter(
+      (m) =>
+        capturedTs.has(m.ts) &&
+        m.ts !== guidedRow.ts &&
+        verdict.get(m.ts) !== null,
+    ).length;
   const transportStored = (rows: Memory[]) =>
     TRANSPORT.filter((g) =>
       rows.some((m) => m.content.includes(withCommand(g.content).slice(0, 60))),
@@ -422,10 +449,12 @@ try {
   lines.push("");
   lines.push(
     `${stored.length} rows written by the shipped capture path over ${candidates.length} scripted ` +
-      `candidates, ${distractors.length} equal distractors, ${transportQueries.length} dataset queries ` +
-      `+${documentedQueries.length} doc queries. Verdicts from the shipped availabilityIndex; selection ` +
-      `by the shipped selectRelevant with its real byte budget. Budgets are fractions of the ` +
-      `unbudgeted block (${FULL} bytes).`,
+      `candidates, ${seeded.length} seeded background rows in EVERY arm, ${transportQueries.length} ` +
+      `dataset queries +${documentedQueries.length} doc queries. Verdicts from the shipped ` +
+      `availabilityIndex over captured and background rows alike; selection by the shipped ` +
+      `selectRelevant with its real byte budget. ` +
+      "`delete-original` replays the pinned `362655c` module, not an approximation of it. " +
+      `Budgets are fractions of the unbudgeted block (${FULL} bytes).`,
   );
   lines.push("");
   lines.push("## What each policy leaves in the store");
@@ -492,6 +521,41 @@ try {
   };
   const tight = FRACS[FRACS.length - 2]!;
 
+  // The competition the report advertises must be inside the selector, not just on
+  // disk. An earlier revision filtered the background rows out on the `auto-capture`
+  // tag and still printed their count (#403 review round 2), which is the failure
+  // mode this whole file exists to catch: a harness measuring something else.
+  check(
+    seeded.length > 0 &&
+      names.every(
+        (n) =>
+          JSON.stringify(nonCaptured(arms[n]!)) ===
+          JSON.stringify(expectedNonCaptured),
+      ),
+    `the background really competes: the ${seeded.length} seeded rows plus the guided control are the identical set in every arm (sizes ${names.map((n) => arms[n]!.length).join("/")}, differing only by captured rows the policy deletes) — RED if a filter drops them again`,
+  );
+  // The historical baseline is only faithful while the vendored copy is the
+  // historical module. Checked against the object, not against a remembered count.
+  const pinned = Bun.spawnSync(
+    [
+      "git",
+      "-C",
+      join(import.meta.dir, "..", ".."),
+      "show",
+      "362655c:src/capture/available.ts",
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  const vendored = readFileSync(
+    join(import.meta.dir, "..", "fixtures", "available-362655c.ts"),
+    "utf8",
+  );
+  check(
+    pinned.exitCode !== 0 ||
+      vendored.includes(pinned.stdout.toString().trimStart().slice(0, 400)),
+    `the pinned baseline is the real module${pinned.exitCode !== 0 ? " (git object unavailable here; the vendored copy is what ran)" : ""} — RED if the fixture was edited away from 362655c`,
+  );
+
   const headerOnly = await scoreArmHeaderOnly(arms.tag);
   check(
     headerOnly === 0,
@@ -550,8 +614,15 @@ try {
     `conservation: all ${candidates.length} scripted candidates reached the store${missing.length ? ` — LOST: ${missing.map((m) => m.content.slice(0, 48)).join(" | ")}` : ""}, RED with the lost prose named so the gate reason can be read off the trail`,
   );
   check(
-    originalKills.length === TRANSPORT_WITH_COMMAND.length,
-    `the 362655c reproduction bites exactly its target population: ${originalKills.length}/${TRANSPORT_WITH_COMMAND.length} command-stating facts refused — RED if the reproduction drifts`,
+    originalKills.length >= TRANSPORT_WITH_COMMAND.length &&
+      DOCUMENTED.every((d) =>
+        stored.some(
+          (m) =>
+            m.content.includes(d.slice(0, 40)) &&
+            hist.check(m.content) !== null,
+        ),
+      ),
+    `the baseline is the historical rule, not a stand-in: the pinned 362655c module refuses ${originalKills.length} of ${stored.length} captured rows, including every documented fact and all ${TRANSPORT_WITH_COMMAND.length} command-stating ones — RED if the vendored module drifts or a hand-written approximation creeps back`,
   );
   check(
     transportStored(arms["delete-original"]!) < TRANSPORT.length,
@@ -588,9 +659,9 @@ try {
     `WIN vs no check at all, stated honestly: the tag arm never spends MORE block bytes on facts the tree already states, at any budget, and spends fewer where the budget binds (${col("tag", "restatableBytes")} vs ${col("off", "restatableBytes")})`,
   );
   check(
-    restatableStored(arms["delete-hardened"]!) === 0 &&
-      restatableStored(arms.tag!) > 0,
-    `deleting is not free: the tag arm keeps ${restatableStored(arms.tag!)} restatable facts a budget can still surface; #397's policy keeps ${restatableStored(arms["delete-hardened"]!)}, unreachable at any budget`,
+    restatableCaptured(arms["delete-hardened"]!) === 0 &&
+      restatableCaptured(arms.tag!) > 0,
+    `deleting is not free: the tag arm keeps ${restatableCaptured(arms.tag!)} captured restatable facts a budget can still surface; #397's policy keeps ${restatableCaptured(arms["delete-hardened"]!)}, unreachable at any budget`,
   );
   // The exemption can only be observed where the budget can physically hold the
   // line: at 15% the header plus the guided line exceeds the budget in EVERY arm,
