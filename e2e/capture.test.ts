@@ -14,21 +14,32 @@
 // strongest thing available without an API key, and it is not what the unit tests
 // are.
 //
-// What writing this found, measured on 12 identical runs on 2026-11-13:
+// What writing this found, and what fixed it. A/B/A on one script, 12 runs each,
+// back to back on 2026-11-13:
 //
-//   passes started on a real host .............. 12/12
-//   passes that reached the write gate .........  3/12
+//   passes started on a real host .............. 12/12  12/12  12/12
+//   passes that reached the write gate ......... 12/12   6/12  12/12
+//                                          fix  reverted  fix
+//
+// An earlier sample of the same unfixed code gave 3/12, so the unfixed rate moves
+// with machine load. What does not move is that no sample of the unfixed code
+// reached 12/12 and two samples of the fixed code did.
 //
 // `opencode run` disposes the plugin as soon as the turn ends. `captureCleanup`
-// (src/capture/runtime.ts) aborts and then drains, and every pass checks the signal
-// after the model call and stops before the next gate run — the #211 contract, which
-// is correct for its purpose (a pass must not write into a store its caller has torn
-// down) and fatal for this feature on the CLI, where nobody tears anything down and
-// the process simply exits. With the fake model answering instantly, three in four
-// passes are still cut. A real model takes seconds, so the host is gone before the
-// answer arrives. Filed as #404; the assertions here are the ones that hold under
-// that race, and the byte-exact row check tightens to unconditional when the race is
-// fixed.
+// used to abort and then drain, and every pass checked the signal after the model
+// call and stopped before the next gate run — the #211 contract, correct for the
+// teardown it was written for and fatal here, where nobody tears anything down and
+// the process simply exits. Between a quarter and three quarters of passes were
+// cut even with a fake model that answers instantly; a real model takes seconds. #404 split the signal into two phases: cleanup abandons only a pass that
+// has not answered yet, and drains one that has. All four of #211's disposal tests
+// still pass unchanged, because a pass parked IN the model call is still abandoned.
+//
+// The byte-exact row assertion below is therefore unconditional, and it is the
+// control for that fix, not a guard: with the two-phase drain reverted it failed
+// 1 of 4 runs of this file and 6 of 12 runs of the standalone scenario. A race
+// cannot be pinned by a real-host test, so the deterministic half lives in
+// test/capture-dispose-drain.test.ts, which disposes a pass parked IN the model
+// call and a pass that already answered, and gets opposite answers.
 import {
   afterAll,
   afterEach,
@@ -193,34 +204,28 @@ describe("auto-capture on the real host", () => {
     expect(cost).toMatch(/prompt_chars=[1-9]/);
   }, 240_000);
 
-  test("a pass that survives teardown writes the candidate byte for byte", async () => {
+  test("the pass survives host teardown and writes the candidate byte for byte", async () => {
     const g = gitGuest({ autoCapture: true, captureModel: "fake/scripted" });
     scriptCaptureTurn(g);
     const run = await turn(fake, g, PROMPT);
     expect(run.exit).toBe(0);
 
-    // Bounded wait, not a sleep: the pass is racing host exit (see the header), so
-    // this asserts the shape of a completed pass whenever one completes, and says so
-    // rather than passing silently when none does.
-    let done = false;
-    for (let i = 0; i < 40 && !done; i++) {
+    // Bounded wait, not a fixed sleep: the row is written during cleanup, and the
+    // host process then exits, so the only unknown is when the files land.
+    let rows: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      rows = storeRows(g).filter((l) => l.includes("auto-capture"));
+      if (rows.length > 0) break;
       await Bun.sleep(100);
-      done = withEv(evidenceLines(g), "capture_lag").length > 0;
     }
     const ev = evidenceLines(g);
-    const rows = storeRows(g).filter((l) => l.includes("auto-capture"));
-    if (!done) {
-      // The race, reported rather than hidden: a run that never got to the gate
-      // must not be able to look like a pass that wrote the right thing.
-      expect(rows).toHaveLength(0);
-      console.log(
-        "[capture-race] the host disposed the plugin before the gate; no row written",
-      );
-      return;
-    }
     expect(rows.length).toBe(1);
     // Byte-for-byte: a pass that stored a paraphrase would still be "one row".
     expect(rows[0]).toContain(CANDIDATE.content);
+    // The pass ran to completion, not just to the store: the completion receipt is
+    // what distinguishes a surviving pass from a cut one (#404), and the scan line
+    // carries the availability fields this PR added.
+    expect(withEv(ev, "capture_lag").at(-1)).toContain("outcome=candidates");
     const scan = withEv(ev, "auto_capture_scan").at(-1) ?? "";
     expect(scan).toContain("verdicts=");
     expect(scan).toContain("restatements=");
