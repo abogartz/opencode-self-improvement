@@ -37,8 +37,10 @@
 //
 // MUST GO RED (exit 1) if any control fails — in particular the negative control
 // (a header-only budget scores 0 in every arm), the no-drop control (`tag` and
-// `off` hold the same rows), and each win claim. A harness that cannot fail does
-// not count.
+// `off` hold the same rows), the scoring-validity control (a query must be able to
+// find its own gold alone in the store, or every recall figure here is meaningless
+// and green), the case bank (every adversarial verdict re-decided), and each win
+// claim. A harness that cannot fail does not count.
 //
 //   bun bench/runners/availability-policy-compare.ts
 import {
@@ -65,6 +67,7 @@ import { formatMemory } from "../../src/inject/format.ts";
 import { availabilityIndex } from "../../src/capture/available.ts";
 import { availabilityIndex as historicalAvailabilityIndex } from "../fixtures/available-362655c.ts";
 import { selectRelevant } from "../../src/recall/relevant.ts";
+import { QUERY_STOPWORDS } from "../../src/recall/score.ts";
 import { buildStore, MEMORIES, QUERIES } from "../fixtures/recall-dataset.ts";
 import { AVAILABILITY_CASES } from "../fixtures/availability-cases.ts";
 import { loadPlugin } from "../../test/harness.ts";
@@ -321,6 +324,55 @@ try {
   const tagged = stored.filter((m) => m.tags?.includes(RESTATABLE_TAG));
   /** Restatable by the shipped check, independent of what each arm stored. */
   const isRestatable = (m: Memory): boolean => verdictOf(m) !== null;
+  /**
+   * The same check applied to the rows capture did NOT write. The pass rate on
+   * fresh candidates is only interpretable against a base rate: 6 of 16 is 37.5%
+   * of a pass, but if the pre-existing store scores a similar rate the check is
+   * simply broad, and if it scores near zero the check is singling out what
+   * capture produces. Neither reading was available before, and the "0 bytes
+   * spent" figures for `drop-at-read` are vacuous either way unless the check
+   * fires on something other than this one pass.
+   */
+  const backgroundRestatable = seeded.filter(isRestatable);
+  /**
+   * The tracked tree, as text, read back the way the check reads it. Used for two
+   * things below: whether a marked row has ANY support in the tree, and whether
+   * the seeded background relates to the tree at all — which decides whether the
+   * background base rate means anything.
+   */
+  const treeText = (
+    Bun.spawnSync(["git", "-C", repo, "ls-files"]).stdout?.toString() ?? ""
+  )
+    .split("\n")
+    .filter((f) => f.trim())
+    .map((f) => readFileSync(join(repo, f), "utf8"))
+    .join("\n")
+    .toLowerCase();
+  const treeTokens = new Set(
+    treeText
+      .split(/[^a-z0-9']+/)
+      .filter((t) => t.length > 3 && !QUERY_STOPWORDS.has(t)),
+  );
+  /** Every row the check marks, captured or background. */
+  const markedAll = [...stored, ...seeded].filter(isRestatable);
+  /** Marked rows that share no substantive word with the tree: marked on nothing. */
+  const markedWithoutSupport = markedAll.filter((m) => {
+    const rowTokens = m.content
+      .toLowerCase()
+      .split(/[^a-z0-9']+/)
+      .filter((t) => t.length > 3 && !QUERY_STOPWORDS.has(t));
+    return !rowTokens.some((t) => treeTokens.has(t));
+  });
+  /** Seeded rows that quote a sentence of the tree — the base rate's explanation. */
+  const seededSharingTree = seeded.filter((m) => {
+    const c = m.content.toLowerCase();
+    return treeText
+      .split(/[.;:]\s/)
+      .some(
+        (s) =>
+          s.split(/\s+/).filter(Boolean).length >= 6 && c.includes(s.trim()),
+      );
+  });
 
   // The historical rule, replayed by the module that shipped it. Cached: the size
   // sweep rebuilds every arm four times and this is a tree scan.
@@ -632,6 +684,26 @@ try {
           `holds everything and the two arms agree.`,
   );
   lines.push("");
+  // The base rate, stated with its cause. "0 of 180" without the cause reads as
+  // the check being sparing on ordinary rows; here the fixture simply gives it
+  // nothing to find. The prose is conditional because the sentence must not be
+  // able to outlive the number that makes it true.
+  lines.push(
+    `**Where the tag lands.** ${tagged.length} of ${stored.length} rows this pass wrote carry it ` +
+      `(${Math.round((tagged.length / stored.length) * 100)}%), against ${backgroundRestatable.length} ` +
+      `of ${seeded.length} rows already in the store when the pass ran ` +
+      `(${Math.round((backgroundRestatable.length / seeded.length) * 100)}%). ` +
+      (backgroundRestatable.length === 0
+        ? `That 0 is a property of this fixture, not of the check: ${seededSharingTree.length} of the ` +
+          `${seeded.length} seeded rows quote a sentence of the tracked tree, so there was nothing there ` +
+          `for the check to find. No real-world base rate is claimed — that needs a store written in the ` +
+          `same repo it is read from.`
+        : `${seededSharingTree.length} of those marked background rows quote a sentence of the tracked ` +
+          `tree; read the base rate against that, not as a rate over unrelated prose.`) +
+      ` What is established is the direction the tag asserts: all ${markedAll.length} marked rows share ` +
+      `substantive words with the tracked tree, which the control below re-checks every run.`,
+  );
+  lines.push("");
 
   // ── Does the win survive a different store size? ────────────────────────────
   // One competitor count is one data point. The demotion only pays where the
@@ -913,6 +985,16 @@ try {
   check(
     ceilingT > 0 && ceilingD > 0,
     `the hit metric can score at all: ${ceilingT}/${transportQueries.length} transport and ${ceilingD}/${documentedQueries.length} doc queries retrieve their own gold alone${blindTransport.length ? ` — unretrievable golds: ${[...new Set(blindTransport)].join(", ")}` : ""} — RED if a family goes wholly blind, because a wholly blind family reports 0 in every arm and no other control would notice`,
+  );
+  // The tag's own claim, tested instead of asserted: a row is marked because the
+  // tracked tree states the fact. A marked row with no substantive word in common
+  // with the tree is a row marked on nothing, and every byte figure in this report
+  // would then rest on a check that fires at random. `markedAll.length > 0` is the
+  // other half — with nothing marked the first clause is vacuously true, and a
+  // vacuous pass is how a check that stopped working reads as green.
+  check(
+    markedAll.length > 0 && markedWithoutSupport.length === 0,
+    `every marked row is supported by the tracked tree: ${markedAll.length} marked of ${stored.length + seeded.length} rows, ${markedWithoutSupport.length} with no substantive word in common${markedWithoutSupport.length ? ` — ${markedWithoutSupport.map((m) => m.content.slice(0, 40)).join(" | ")}` : ""} — RED if a row is marked on nothing, or if nothing is marked at all`,
   );
   check(
     sweep.every((s) =>

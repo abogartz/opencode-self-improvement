@@ -29,6 +29,8 @@ Arms in every column: off / tag / drop-at-read / delete-hardened / delete-origin
 
 **Cost.** The tag arm answers 0,0,0,0,6 of 6 queries about facts the README also states, where the no-check arm answers 5,6,6,6,6. It gives up those slots at 15%, 25%, 40%, 60% budget — the demotion working as designed, because the tree has the fact, and a real loss all the same. At 85% the budget holds everything and the two arms agree.
 
+**Where the tag lands.** 6 of 16 rows this pass wrote carry it (38%), against 0 of 180 rows already in the store when the pass ran (0%). That 0 is a property of this fixture, not of the check: 0 of the 180 seeded rows quote a sentence of the tracked tree, so there was nothing there for the check to find. No real-world base rate is claimed — that needs a store written in the same repo it is read from. What is established is the direction the tag asserts: all 6 marked rows share substantive words with the tracked tree, which the control below re-checks every run.
+
 ## Does the win survive a different store size?
 
 Same 16 captured rows, background resampled at 0/30/90/180 rows; budget recomputed per size (2413/2791/3479/4608 bytes unbudgeted), shown at 25%, 40%, 60%. Transport facts in block.
@@ -94,6 +96,7 @@ The scan line reported 6 verdicts and 6 tagged rows; 0 of those verdicts landed 
 - PASS — the shipped matcher still decides every adversarial case: 23/23 — RED with the case named, so the veto that moved is readable from its "found by" column
 - PASS — a read-time drop removes exactly the restatable rows and nothing else: it keeps 10/10 transport facts and 191 of 197 rows — RED if a verdict is read from the wrong row, which is what a ts-keyed lookup does when a pass writes rows in one millisecond
 - PASS — the hit metric can score at all: 14/21 transport and 6/6 doc queries retrieve their own gold alone — unretrievable golds: m01, m02, m04, m07, m08, m12, m14 — RED if a family goes wholly blind, because a wholly blind family reports 0 in every arm and no other control would notice
+- PASS — every marked row is supported by the tracked tree: 6 marked of 196 rows, 0 with no substantive word in common — RED if a row is marked on nothing, or if nothing is marked at all
 - PASS — the win is not an artefact of one store size: tag is at or above both delete-original and drop-at-read on transport facts at all 4 background sizes x 3 budgets (0:8/9/9 30:8/9/9 90:7/9/9 180:8/9/9)
 - PASS — the P3 preview does what it claims: drop-at-read spends 0 block bytes on facts the tree states at every budget — and the transport column is the price (7,8,9,9,9 vs tag 7,8,9,9,9)
 
