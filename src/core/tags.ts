@@ -2,6 +2,20 @@
 export const AUTO_CAPTURE_TAG = "auto-capture";
 
 /**
+ * #402: the working tree already states this fact, so the next session can read
+ * it there. Captured from #389's availability check, which used to DROP these
+ * candidates. Measured on this repo's store, that check refused 0 of 1166 real
+ * rows after four review rounds, and the version before it refused 30 of which
+ * 29 were wrong — so the verdict is a tag now, and a wrong match costs a tag
+ * instead of a fact.
+ *
+ * Retrieval sorts these rows last within their score band: a restatement is the
+ * first thing to give up budget when the block is full, and the last thing worth
+ * a slot when it is not.
+ */
+export const RESTATABLE_TAG = "restatable";
+
+/**
  * #393: a capture candidate whose numeric claim was CHECKED against the working
  * tree and agreed. Absent on every other row, which is what makes the injected
  * `[unverified]` marker mean something rather than decorate everything.

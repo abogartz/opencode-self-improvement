@@ -150,6 +150,7 @@ export function makeGuest(
   fake: Fake,
   pluginPath: string,
   extraPlugins: string[] = [],
+  pluginOptions: Record<string, unknown> = {},
 ): Guest {
   const root = mkdtempSync(join(tmpdir(), "psi-e2e-"));
   const g = (n: string) => {
@@ -184,7 +185,14 @@ export function makeGuest(
         },
         model: "fake/scripted",
         plugins: [
-          { package: pluginPath },
+          // `options` is omitted entirely when empty, so every existing caller
+          // writes the byte-identical config it always did.
+          {
+            package: pluginPath,
+            ...(Object.keys(pluginOptions).length
+              ? { options: pluginOptions }
+              : {}),
+          },
           ...extraPlugins.map((p) => ({ package: p })),
         ],
       },

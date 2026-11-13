@@ -174,6 +174,59 @@ test("control: the same pass with no disposal does promote (so the check is what
   expect(rows[0]?.content).toContain("fourteen days of tarballs");
 });
 
+// #404: the other side of the same teardown. The pass above is parked IN the
+// model call when cleanup runs, so abandoning it is right. A pass that already
+// HOLDS its answer is different work — the gate is local and milliseconds — and
+// on `opencode run` nothing is being torn down at all: the process exits. The
+// old single-signal drain abandoned those passes too, which is how between a
+// quarter and three quarters of real CLI captures recorded `capture_cost` and no
+// row (#404, A/B/A on 2026-11-13: 12/12 fixed, 6/12 reverted, 12/12 fixed).
+//
+// What this pins that the real-host scenario cannot: that `cleanup()` resolves
+// with the row already in the store. The scenario asserts the user-visible
+// contract — the row survives the host exiting — but that is a race. Here the
+// ordering is forced by parking the model and releasing it at a known point, and
+// the assertion is checked before any sleep.
+test("a pass that already holds its answer is drained, not abandoned (#404)", async () => {
+  const loaded = await loadPlugin(root, {
+    autoCapture: true,
+    captureModel: "fake/model",
+  });
+  plugin = loaded;
+  const sid = "ses-survive";
+  await ground(loaded, sid);
+  const park = parked();
+  loaded.capture.generate.park = park.promise;
+  loaded.capture.generate.response = CANDIDATE;
+  await loaded.sessionHooks.compaction?.({
+    sessionID: sid,
+    system: [],
+    messages: thickMessages(),
+  });
+  await waitFor(() => loaded.capture.generate.calls.length === 1);
+  park.release();
+  // `capture_cost` is the first line written after `generate.text` resolves and
+  // before the gate, so its presence puts the pass inside the drain window
+  // rather than leaving the release-to-cleanup ordering to chance.
+  await waitFor(() =>
+    readEvidenceLog().some((l) => String(l.ev) === "capture_cost"),
+  );
+
+  await loaded.cleanup();
+
+  // Deliberately no sleep first: on the CLI, cleanup resolving is the last
+  // moment the store is guaranteed to exist. A pass that needs more than the
+  // drain has lost, and this test must fail for that too.
+  const rows = await capturedRows();
+  expect(rows.length).toBe(1);
+  expect(rows[0]?.content).toContain("fourteen days of tarballs");
+  // The gate really ran, rather than a row appearing by some other route.
+  // `write_promoted` is the gate's own line; the trigger-qualified receipt is
+  // `auto_capture_compaction_promoted` here, not `auto_capture_promoted`.
+  expect(readEvidenceLog().some((l) => l.ev === "write_promoted")).toBe(true);
+  expect(readEvidenceLog().some((l) => l.ev === "capture_lag")).toBe(true);
+});
+
 // The pre-model path (#211 review): the first abort check sat after the model
 // call, so a pass parked in `session.context` woke up AFTER cleanup() returned
 // (the drain expires at its bound rather than hanging on a call that will never

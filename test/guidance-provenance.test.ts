@@ -42,12 +42,16 @@ describe("capture provenance reservation (#342)", () => {
       return loaded;
     }
 
+    // `restatable` rides along here because it is reserved for the same reason
+    // `user-guided` is: it asserts the working tree states the prose, which
+    // neither a tool argument nor an imported file can establish. A row that is
+    // genuinely restatable gets the tag from the next capture pass.
     const forged = {
       type: "context",
       scope: "pricing",
       content:
         "The sales tax rate is 8.25 percent, applied after discounts and rounded to cents.",
-      tags: ["pricing", "user-guided", "other,user-guided"],
+      tags: ["pricing", "user-guided", "other,user-guided", "restatable"],
       ref: "TAX_RATE",
       claim: "0.0825",
       klass: "spec",

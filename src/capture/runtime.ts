@@ -6,6 +6,7 @@ import { session, setCurrent } from "../core/state.ts";
 import {
   AUTO_CAPTURE_TAG,
   CODE_CHECKED_TAG,
+  RESTATABLE_TAG,
   USER_GUIDED_TAG,
 } from "../core/tags.ts";
 import { record, recordCaptureLag } from "../evidence/record.ts";
@@ -22,6 +23,7 @@ import {
 import { quarantineCandidate } from "../store/quarantine/quarantine.ts";
 import { flattenMemoryText } from "../store/sanitize.ts";
 import { redactSecrets } from "../store/secrets.ts";
+import { type AvailabilityIndex, availabilityIndex } from "./available.ts";
 import { parseCandidates, parseModelRef } from "./candidates.ts";
 import { claimVerdictFromContent } from "./checked.ts";
 import {
@@ -235,30 +237,102 @@ export function configureAutoCapture(
       // gate receipts, promoted rows, supersession. The contract is bounded
       // and explicit:
       //   1. cleanup aborts the subscription, so no NEW pass starts;
-      //   2. every pass checks the signal after the model call and between
-      //      candidates, and stops BEFORE the next gate run — a gate already
-      //      mutating is never cut in half, because a half-applied gate is
+      //   2. every pass checks its own abandonment flag after the model call and
+      //      between candidates, and stops BEFORE the next gate run — a gate
+      //      already mutating is never cut in half, because a half-applied gate is
       //      worse than a late one;
       //   3. cleanup then drains the tracked passes up to DRAIN_LIMIT_MS, so
       //      a caller that removes the store right after cleanup sees nothing
-      //      straggling. A generate that outlives the bound is covered by (2),
-      //      not by the drain: teardown never waits on the model.
+      //      straggling. A pass still working when the bound expires is abandoned
+      //      there and then, so it stops at its next candidate boundary; a
+      //      generate that outlives the bound is covered by (2), not by the
+      //      drain: teardown never waits on the model.
+      //
+      // #404 changed (2) from one signal into two phases, because one signal
+      // conflated two different situations and the conflation killed the feature
+      // on the CLI. A pass PARKED in `generate.text` when the host disposes must
+      // never write — that is #211, and the caller may remove the store the
+      // moment cleanup resolves. A pass that already HOLDS its model answer is
+      // different work: the answer exists, the gate is milliseconds of local
+      // work, and on `opencode run` nothing is being removed at all — the process
+      // simply exits. Aborting that pass is why most real CLI passes recorded
+      // `capture_cost` and no row — 9 of 12 in one sample, 6 of 12 in a
+      // controlled A/B (#404): the abort fired on the healthy path, in the only
+      // window capture is allowed to run. Past-model passes are bounded by the
+      // drain instead, which is what the drain is for.
       const DRAIN_LIMIT_MS = 1000;
+      type PassPhase = {
+        /** Set the instant `generate.text` resolves. */
+        pastModel: boolean;
+        /** Set by cleanup, and only for a pass that has not answered yet. */
+        abandoned: boolean;
+      };
       const inFlight = new Set<Promise<unknown>>();
-      function track<T>(pass: Promise<T>): Promise<T> {
-        const wrapped = pass.finally(() => inFlight.delete(wrapped));
+      const passPhases = new Set<PassPhase>();
+      function newPhase(): PassPhase {
+        return { pastModel: false, abandoned: false };
+      }
+      function track<T>(pass: Promise<T>, phase?: PassPhase): Promise<T> {
+        const wrapped = pass.finally(() => {
+          inFlight.delete(wrapped);
+          if (phase) passPhases.delete(phase);
+        });
+        if (phase) passPhases.add(phase);
         inFlight.add(wrapped);
         return wrapped;
       }
+      /**
+       * Teardown, in two phases (#404).
+       *
+       * 1. Abandon every pass that has not answered yet, then drain what is
+       *    left, bounded. A parked `generate.text` can outlive any bound, so
+       *    abandoning it is what makes the bound mean something: #211's caller
+       *    may remove the store the moment cleanup resolves.
+       * 2. A pass that already holds its answer is never abandoned. It is
+       *    drained instead, because its remaining work is the gate — local,
+       *    milliseconds — and killing it is what lost most real CLI captures
+       *    (#404: 9 of 12 in one sample, 6 of 12 in a controlled A/B).
+       *
+       * The residual risk is a stated constant, not an accident. If the bound
+       * expires while a past-model pass is still working, cleanup returns and at
+       * most the gate run already in progress can land afterwards — the drain
+       * abandons the pass so its remaining candidates stop at the next boundary.
+       * Before #404 that residual was unbounded in a different way: a generate
+       * that outlived the bound woke up and ran the whole gate, which is what
+       * #211 was filed about. Neither version ever cuts a gate in half.
+       *
+       * Nothing here writes. #211's tested contract is that a disposed instance
+       * leaves no trace at all after cleanup, and an abandonment receipt would
+       * break it in all four of that issue's cases — `appendLog` calls
+       * `ensureDir`, so the receipt resurrects a directory the caller deleted.
+       * An abandoned pass is instead identified by the gap it leaves: a
+       * `capture_cost` line with no later `capture_lag` for the same session is
+       * a pass that was cut, and both lines are already written.
+       */
       async function drainInFlight(): Promise<void> {
+        for (const phase of passPhases) {
+          if (!phase.pastModel) phase.abandoned = true;
+        }
         if (!inFlight.size) return;
+        let timedOut = false;
         let timer: ReturnType<typeof setTimeout> | undefined;
         const bound = new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, DRAIN_LIMIT_MS);
+          timer = setTimeout(() => {
+            timedOut = true;
+            resolve();
+          }, DRAIN_LIMIT_MS);
         });
         await Promise.race([Promise.allSettled([...inFlight]), bound]).finally(
           () => clearTimeout(timer),
         );
+        // The bound expired, so cleanup is returning while a pass still works.
+        // Abandon it now: it is past the model, so it may not be stopped inside a
+        // gate run, but it stops at the next candidate boundary instead of
+        // running an unbounded list against a process that is on its way out.
+        // That makes the residual risk a stated constant — at most the one gate
+        // run already in progress can land after cleanup returns — rather than a
+        // function of how many candidates the model returned.
+        if (timedOut) for (const phase of passPhases) phase.abandoned = true;
       }
       const eventApi = ctx.event;
       const generateApi = ctx.generate;
@@ -328,6 +402,14 @@ export function configureAutoCapture(
         // cannot re-stamp this operation's receipts. Optional for direct
         // callers, which bind here instead.
         gate?: GateContext,
+        // Teardown phase, owned by the caller that `track()`s this pass. Both
+        // production triggers pass one. The default is for direct callers —
+        // tests, and any future seam that runs a pass outside the subscription —
+        // and reads "not drainable, so not abandonable": an untracked pass is
+        // not in `inFlight`, so cleanup could neither wait for it nor stop it
+        // safely, and killing work the drain cannot bound is the failure mode
+        // this parameter exists to avoid.
+        phase: PassPhase = { pastModel: true, abandoned: false },
       ): Promise<void> {
         const captureGate = gate ?? bindCapture(sid);
         const captureReader = captureGate.reader ?? readerFromSid(sid);
@@ -539,13 +621,17 @@ export function configureAutoCapture(
           model,
           prompt: capturePrompt,
         });
+        // The phase boundary. From here the answer exists, so cleanup stops
+        // abandoning this pass and drains it instead (#404). Set before the next
+        // await, so a disposal during anything below cannot be missed.
+        phase.pastModel = true;
         const text = typeof out === "string" ? out : (out?.text ?? "");
-        // #211: disposed while the model call was in flight. Stop here — the
+        // #211: abandoned while the model call was in flight. Stop here — the
         // gate, the rows and the receipts below all write to a store the
         // caller may already have removed. Silent on purpose: a receipt here
         // is the ENOENT teardown noise this check exists to eliminate, and
         // the drain in cleanup means the pass is finished, not lost mid-air.
-        if (controller.signal.aborted) return;
+        if (phase.abandoned) return;
         // #387: bill our own call. `generate.text` resolves to `{ text }` and
         // nothing else — no `usage`, no `tokens` (probed against the running
         // host) — and capture is not part of any session's event stream, so a
@@ -656,6 +742,31 @@ export function configureAutoCapture(
               c.original = undefined;
           }
         }
+        // #389: availability before authority. A candidate that restates a
+        // tracked file, or names a command the project already declares, is
+        // readable by the next session without a row — and capture costs about a
+        // third of a session's own generation.
+        //
+        // #402 P0: built on FIRST USE, not on every pass. The build is a
+        // synchronous `git ls-files` plus a read of every tracked text file —
+        // measured here at 108 ms for 218 files and 2.11 MB — and the pass that
+        // needs it least is the one that used to pay for it: a model answer of
+        // `[]` still scanned the tree. One build per pass is kept, so the cost is
+        // now bounded by the candidates that exist.
+        let availableIndex: AvailabilityIndex | undefined;
+        let availableMs = 0;
+        const availability = (): AvailabilityIndex => {
+          if (!availableIndex) {
+            const t0 = Date.now();
+            availableIndex = availabilityIndex(
+              captureReader.kind === "repo"
+                ? captureReader.scope.path
+                : undefined,
+            );
+            availableMs = Date.now() - t0;
+          }
+          return availableIndex;
+        };
         // S1 (learn-from-failure): a row that CITES a failing command is
         // claiming to be a lesson, and the claim is checked against the ledger,
         // not against the model's retelling. ReMe (Findings ACL 2026) found
@@ -672,6 +783,15 @@ export function configureAutoCapture(
         // recall loss here.
         let lessonsKept = 0;
         let lessonsRefused = 0;
+        // #402: rows tagged `restatable` this pass. Counted, never dropped.
+        // Two numbers, because they are two different facts and one field that
+        // silently means "verdicts" reads as "rows" (#403 review round 1). A
+        // verdict lands on candidates the write gate then refuses — a dup, a
+        // credential-shaped scope — and a refused row carries no tag, so the
+        // verdict count is an upper bound on the tagged count, never equal by
+        // construction.
+        let availVerdicts = 0;
+        let restatements = 0;
         candidates = candidates.filter((c) => {
           if (c.failure === undefined) return true;
           const cite = normWs(c.failure).toLowerCase();
@@ -699,8 +819,67 @@ export function configureAutoCapture(
           );
         for (const c of candidates) {
           // Between candidates, never inside a gate run: a supersession that
-          // half-applied is a store the next session cannot trust.
-          if (controller.signal.aborted) return;
+          // half-applied is a store the next session cannot trust. The phase
+          // flag, not the signal: this loop only runs once the answer exists,
+          // and cleanup stops abandoning such a pass (#404).
+          if (phase.abandoned) return;
+          // #402: the availability verdict TAGS the row. It used to `continue`
+          // past the write, and that is the defect #402 exists for. A lexical
+          // match was never strong enough to delete a fact — 29 of the 30 rows
+          // the first version refused were new facts, and a silently dropped
+          // candidate leaves no trace to recover from.
+          //
+          // The row now goes through the same write gate as every other row, and
+          // the tag is what retrieval acts on: `restatable` rows sort last, so a
+          // full injection block gives them up first and a spare one keeps them.
+          // A wrong verdict costs one row. A right one saves a slot. That is the
+          // first version of this where the two error directions are both
+          // survivable, which is why four rounds of patches could not produce it.
+          const avail = availability().check(c.content);
+          if (avail) {
+            availVerdicts++;
+            await record(
+              "auto_capture_restatable",
+              {
+                session: sid,
+                trigger,
+                type: c.type,
+                scope: redactSecrets(c.scope),
+                reason: avail.reason,
+                where: avail.where,
+                // `matched` is a slice of the CANDIDATE, not of the tree, so it
+                // carries model prose too: measured, `Ship with \`npm run deploy\`.<NUL>`
+                // yields `matched` ending in the NUL. Flattened for the reason
+                // below.
+                matched: flattenMemoryText(avail.matched),
+                // The whole candidate, so the audit line alone can rebuild a row
+                // a later consolidation drops. It records the VERDICT, not proof
+                // of storage: this line is written before the gate, so a
+                // candidate the gate then refuses has one and no row. The row's
+                // fate is the adjacent `auto_capture_<action>` line, same pass,
+                // same type and scope; `restatements` on the scan line counts
+                // only rows that were really tagged.
+                //
+                // Both free-text fields here are flattened, which nothing else on
+                // this path does: `candidates.ts` checks type and scope for control
+                // characters but not content, `scrubFields` only redacts
+                // credentials, and the logfmt writer escapes `\ " \n \r \t` and
+                // nothing else. Without this, a NUL or U+2028 from model prose
+                // lands raw in the day log and `memory_evidence` hands it straight
+                // back to a model. Redact FIRST: flattening a PEM body would break
+                // the pattern that recognises it. The systemic version — flattening
+                // every string field in `scrubFields` — is deliberately NOT done
+                // here, because it would change the meaning of existing audit
+                // lines that carry multi-line values.
+                content: flattenMemoryText(redactSecrets(c.content)),
+                ...(c.guided ? { guided: true } : {}),
+                ...(modelTag ? { model: modelTag } : {}),
+              },
+              false,
+              sid,
+              captureGate.evidenceContext,
+            );
+          }
           // #393 AC 2: a numeric claim capture INFERRED (the user did not state
           // it) that names a constant the tree also names is checked before it
           // is stored. Only a contradiction refuses; "undecidable" is the
@@ -753,6 +932,8 @@ export function configureAutoCapture(
                 ...(original ? { original } : {}),
                 tags: [
                   AUTO_CAPTURE_TAG,
+                  // #402: the tree states this too. Stored anyway, sorted last.
+                  ...(avail ? [RESTATABLE_TAG] : []),
                   // #393: the ONE case that earns `[code-checked]` — an inferred
                   // numeric claim that agreed with the tree. Absent everywhere
                   // else, which is what makes `[unverified]` mean something
@@ -784,6 +965,10 @@ export function configureAutoCapture(
             );
             continue;
           }
+          // The tag exists only on a row the gate really wrote. `blocked` writes
+          // nothing and `collapsed` folds into an existing row whose tags are not
+          // these, so only `promoted` can carry `restatable` into the store.
+          if (avail && outcome.action === "promoted") restatements++;
           await record(
             trigger === "compaction"
               ? `auto_capture_compaction_${outcome.action}`
@@ -837,6 +1022,35 @@ export function configureAutoCapture(
             }
           }
         }
+        // #402 P0: the scan is now visible in the trail. `scanned()` shipped
+        // "for evidence" and was never called, so a synchronous tree read ran
+        // every pass with no record that it happened. One line per pass that
+        // actually built the index, naming files, bytes and milliseconds.
+        if (availableIndex) {
+          const scan = availableIndex.scanned();
+          await record(
+            "auto_capture_scan",
+            {
+              session: sid,
+              trigger,
+              files: scan.files,
+              bytes: scan.bytes,
+              ms: availableMs,
+              tracked: scan.tracked,
+              capped: scan.capped,
+              // Two numbers on purpose: `verdicts` is how many candidates the
+              // check matched, `restatements` how many rows carry the tag. They
+              // differ exactly by the verdicts the write gate refused, and a
+              // reader who sees one number will assume it is the other.
+              verdicts: availVerdicts,
+              restatements,
+              ...(modelTag ? { model: modelTag } : {}),
+            },
+            false,
+            sid,
+            captureGate.evidenceContext,
+          );
+        }
         await recordCaptureLag(
           sid,
           lagMs,
@@ -884,9 +1098,15 @@ export function configureAutoCapture(
             // another repository; resolving it there would stamp the failure
             // receipt of repo A's capture as repo B's evidence.
             let opGate: GateContext | undefined;
+            // Created before the first await so cleanup can see this pass in the
+            // window before the model call, where #211 still applies in full.
+            const phase = newPhase();
             try {
               opGate = bindCapture(sid);
-              await track(captureSession(sid, "", "idle", undefined, opGate));
+              await track(
+                captureSession(sid, "", "idle", undefined, opGate, phase),
+                phase,
+              );
             } catch (err) {
               // Teardown is not a capture failure: after cleanup the store may
               // be gone, and a receipt here would be the ENOENT noise #211
@@ -916,6 +1136,10 @@ export function configureAutoCapture(
         }
       })();
       captureCleanup = async () => {
+        // The signal stops NEW passes (the subscription checks it before
+        // dispatch, and the compaction seam checks it before starting). Passes
+        // already started are handled by drainInFlight in two phases: abandon
+        // the unanswered ones, drain the answered ones (#404).
         controller.abort();
         await drainInFlight();
       };
@@ -936,6 +1160,7 @@ export function configureAutoCapture(
           const opGate = bindCapture(sid);
           // Tracked, not just fired: cleanup must be able to drain this pass
           // (#211), which is the only reason the seam keeps the promise.
+          const phase = newPhase();
           void track(
             // The predicate, not just the checks inside the pass: a rejection
             // from the awaited model call skips every abort check that follows
@@ -950,9 +1175,11 @@ export function configureAutoCapture(
                   "compaction",
                   messages,
                   opGate,
+                  phase,
                 ),
               () => !controller.signal.aborted,
             ),
+            phase,
           );
         };
       }

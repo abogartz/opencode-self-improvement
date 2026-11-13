@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { RESTATABLE_TAG } from "../src/core/tags.ts";
 import { memoryRoot } from "../src/core/config/paths.ts";
 import { formatLine } from "../src/core/logfmt/format.ts";
 import { capToBudget, injectedRows } from "../src/inject/budget.ts";
@@ -232,5 +233,56 @@ describe("contextualPull budget", () => {
     for (const line of appended.trimStart().split("\n").slice(1)) {
       expect(line.startsWith("- ")).toBe(true);
     }
+  });
+});
+
+describe("restatable rows give up injection budget first (#402)", () => {
+  // Two rows that answer the same prompt. One the working tree already states.
+  // The restatable one is the NEWER row, so without the demotion recency alone
+  // would put it in the block: the assertion cannot pass by accident of scoring.
+  const query = "reorder stock threshold";
+  const kept = {
+    ts: "2026-01-01T00:00:00.000Z",
+    type: "learning",
+    scope: "inventory",
+    content: "Reorder triggers when stock falls below the threshold.",
+    tags: ["auto-capture"],
+  } as unknown as Memory;
+  const restatable = {
+    ts: "2026-02-01T00:00:00.000Z",
+    type: "learning",
+    scope: "inventory",
+    content: "Reorder fires when stock falls below the threshold.",
+    tags: ["auto-capture", RESTATABLE_TAG],
+  } as unknown as Memory;
+
+  test("a tight budget keeps the fact the tree does not hold", async () => {
+    // Budget derived from the rendered block rather than guessed: header plus
+    // exactly one line, so the only thing that decides WHO gets the slot is the
+    // priority order.
+    const full = (await selectRelevant(query, 2, [restatable, kept])).block;
+    const oneLine = full.length - formatMemory(restatable).length - 1;
+    const { block, selected } = await selectRelevant(
+      query,
+      2,
+      [restatable, kept],
+      undefined,
+      undefined,
+      { budget: oneLine },
+    );
+    expect(block).toContain(kept.content);
+    expect(block).not.toContain(restatable.content);
+    // The SELECTION is untouched — only the walk order changed, so the use
+    // ledger and attribution still see both rows and a recall miss stays
+    // diagnosable against the ranking.
+    expect(selected.map((m) => m.ts).sort()).toEqual(
+      [kept.ts, restatable.ts].sort(),
+    );
+  });
+
+  test("a spare budget renders both: a tag is not a delete", async () => {
+    const { block } = await selectRelevant(query, 2, [restatable, kept]);
+    expect(block).toContain(kept.content);
+    expect(block).toContain(restatable.content);
   });
 });
