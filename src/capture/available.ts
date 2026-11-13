@@ -36,12 +36,97 @@ export type AvailabilityVerdict = {
   matched: string;
 };
 
-// Below this a clause is punctuation, not a claim: `the build is green` matches
-// anything. Above it a clause is an assertion, and that is where a short new
-// fact lives — `; External rate is 1900` carries the whole number in 21
-// characters (#397 review, WhollyMindless). So every clause above MIN_TRACE has
-// to be found before the candidate is refused.
-const MIN_TRACE = 16;
+// Tokens that carry no claim of their own: function words, and the handful of
+// verbs whose whole meaning is "this command gets run". A fragment made of
+// nothing but these is a MENTION, and a mention is what the manifest already
+// declares. Everything else is a claim, however short it is — `never` is five
+// characters and it is the entire fact (#397 round 4, WhollyMindless: the length
+// cutoff dropped `Never` and refused the prohibition).
+//
+// This is a whitelist for FILLER, which is the only direction a word list can
+// safely go: a word left off it is read as a claim and the row is kept. The
+// RESTRICTION list this replaces whitelisted what counted as NEW, so every word
+// missing from it lost a fact — that is the defect round 3 reported.
+//
+// Temporal and conditional words (before, after, until, unless, when, if, only,
+// once) and every modal are deliberately absent: they state a condition, and a
+// manifest declares THAT a command exists, never when it may be run.
+const FILLER = new Set([
+  // function words
+  "a",
+  "an",
+  "the",
+  "this",
+  "that",
+  "these",
+  "those",
+  "and",
+  "or",
+  "but",
+  "so",
+  "of",
+  "to",
+  "in",
+  "on",
+  "at",
+  "by",
+  "for",
+  "with",
+  "from",
+  "as",
+  "than",
+  "it",
+  "its",
+  "us",
+  "we",
+  "our",
+  "you",
+  "your",
+  "they",
+  "their",
+  "them",
+  "he",
+  "she",
+  "i",
+  "me",
+  "my",
+  "is",
+  "are",
+  "am",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "do",
+  "does",
+  "did",
+  "have",
+  "has",
+  "had",
+  // mention verbs: "ship with X", "run X", "use X" say only that X is there
+  "run",
+  "runs",
+  "running",
+  "use",
+  "uses",
+  "using",
+  "ship",
+  "ships",
+  "shipping",
+  "deploy",
+  "deploys",
+  "deploying",
+  "call",
+  "calls",
+  "calling",
+  "invoke",
+  "invokes",
+  "invoking",
+  "execute",
+  "executes",
+  "executing",
+]);
 
 // Assertion boundaries: the edges of the one sentence a match is judged inside.
 // The candidate is split on these, and the text in the tree is walked back to
@@ -269,14 +354,27 @@ function gateHit(spans: string[], gates: Gate[]): Gate | null {
 }
 
 /**
- * The assertions in a normalised text: what is left after splitting on the
- * sentence boundaries, minus fragments too short to be a claim.
+ * The assertions in a normalised text: the fragments left after splitting on the
+ * sentence boundaries, minus the ones that state nothing.
+ *
+ * "States nothing" is the FILLER test, not a length. #397 round 4
+ * (WhollyMindless): the cutoff here was 16 characters, so `Never` was dropped
+ * from `Never \`npm run deploy\`.` and an empty list was then read as proof that
+ * the whole candidate was restatable. A short fragment is where a prohibition, a
+ * window or a number lives; punctuation and "ship with" are what a fragment has
+ * to be before it is ignored.
  */
-function assertions(text: string): string[] {
-  return text
-    .split(/[.;:,\n]/)
-    .map((c) => c.trim())
-    .filter((c) => c.length >= MIN_TRACE);
+function claims(text: string): string[] {
+  const out: string[] = [];
+  for (const part of text.split(/[.;:,\n]/)) {
+    const c = part.trim();
+    if (!c) continue;
+    const words = c.split(/[^a-z0-9']+/).filter(Boolean);
+    if (words.length === 0) continue;
+    if (words.every((w) => FILLER.has(w))) continue;
+    out.push(c);
+  }
+  return out;
 }
 
 /** The whole sentence around `start .. start+len`, walked out to the boundaries. */
@@ -401,7 +499,7 @@ export function availabilityIndex(
       //     the restriction and the code appear nowhere.
       // Refusal requires EVERY assertion the candidate makes to be restatable.
       const whole = norm(content);
-      const needed = assertions(whole);
+      const needed = claims(whole);
       if (needed.length === 0) needed.push(whole);
       const first = needed[0] ?? whole;
       if (haystack && allRestatable(haystack, needed)) {
@@ -415,23 +513,34 @@ export function availabilityIndex(
           matched: first.slice(0, 120),
         };
       }
-      // Declared gate. #397 round 3 (WhollyMindless): a short residual used to
-      // count as a restatement on LENGTH alone, so "`npm run deploy` wipes the
+      // Declared gate. Round 3 (WhollyMindless) removed the LENGTH test: a short
+      // residual used to count as a restatement, so "`npm run deploy` wipes the
       // staging database." was refused against a manifest that says only that
-      // `deploy` runs rsync. Length and restriction vocabulary are both the
-      // wrong test — any list of condition words is open-ended, and the row is
-      // new whatever its length. The burden now sits where it belongs: refuse
-      // only when the candidate is POSITIVELY recognised as a restatement of
-      // the declaration, which means stripping the stated commands leaves either
-      // no assertion at all, or assertions the tracked files state themselves.
-      // Everything else is a claim the manifest does not make, and it is kept.
-      const gate = gateHit(statedCommands(content), gates);
+      // `deploy` runs rsync. Round 4 found the same defect still open, in two
+      // places that both throw information away BEFORE deciding:
+      //   - every command span was stripped after ONE declared gate was found,
+      //     so "Before `npm run deploy`, run `aws sso login --profile prod`."
+      //     refused with the undeclared AWS prerequisite erased from the row;
+      //   - an EMPTY claim list counted as proof, so "Never `npm run deploy`."
+      //     refused with its only claim — `never` — dropped as too short.
+      // Refusal now needs all three, each positively established:
+      //   1. every command span the row states is declared. An undeclared one is
+      //      a fact the tree does not hold, whatever the rest of the row says;
+      //   2. what survives stripping them is nothing but FILLER — the bare
+      //      mention "ship with X", which is what the manifest does declare; or
+      //   3. otherwise, every assertion left in it is one the tracked files
+      //      state themselves.
+      const spans = statedCommands(content);
+      const gate = gateHit(spans, gates);
       if (gate) {
+        const undeclared = spans.some((s) => gateHit([s], gates) === null);
         let residual = content;
-        for (const span of statedCommands(content))
-          residual = residual.split(span).join(" ");
-        const claims = assertions(norm(residual));
-        if (claims.length === 0 || allRestatable(haystack, claims)) {
+        for (const span of spans) residual = residual.split(span).join(" ");
+        const rest = claims(norm(residual));
+        if (
+          !undeclared &&
+          (rest.length === 0 || allRestatable(haystack, rest))
+        ) {
           return {
             reason: "declared_gate",
             where: gate.where,

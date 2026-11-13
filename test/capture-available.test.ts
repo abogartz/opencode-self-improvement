@@ -267,6 +267,41 @@ describe("capture availability gate (#389)", () => {
     expect((await rowsWith("release6")).length).toBe(1);
   });
 
+  test("nothing is discarded before the gate decides it is available (#397 round 4)", async () => {
+    // Review #397 (WhollyMindless), two gaps on `fe00c92`:
+    //   - `assertions()` dropped every fragment under 16 characters, so the only
+    //     claim in "Never `npm run deploy`." was erased and the empty list was
+    //     then read as proof the whole row was restatable;
+    //   - the residual stripped EVERY command span after finding ONE declared
+    //     gate, so the undeclared `aws sso login` prerequisite in the second row
+    //     was erased the same way.
+    // The third candidate is the same length cutoff on the other rule: a
+    // 5-character prohibition riding a restated README sentence.
+    await capture(makeRepo("gate-discarded"), [
+      {
+        type: "blocker",
+        scope: "release7",
+        content: "Never `npm run deploy`.",
+      },
+      {
+        type: "learning",
+        scope: "release8",
+        content: "Before `npm run deploy`, run `aws sso login --profile prod`.",
+      },
+      {
+        type: "learning",
+        scope: "mixed3",
+        content: `${README_TEXT}; never.`,
+      },
+    ]);
+    expect(
+      evidence().filter((l) => l.ev === "auto_capture_available"),
+    ).toHaveLength(0);
+    expect((await rowsWith("release7")).length).toBe(1);
+    expect((await rowsWith("release8")).length).toBe(1);
+    expect((await rowsWith("mixed3")).length).toBe(1);
+  });
+
   test("a substring of the OPPOSITE rule is not a restatement (#397 round 3)", async () => {
     // Review #397 (WhollyMindless): the clause lookup matched `Use tabs for
     // indentation.` INSIDE `We do not use tabs for indentation.`. That is the
