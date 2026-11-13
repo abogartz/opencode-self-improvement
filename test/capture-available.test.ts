@@ -24,8 +24,10 @@
 // workspace, or an unreadable file is not evidence that a fact is available, and
 // acting on those would spend the one measured benefit capture has.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { evidenceDir } from "../src/core/config/paths.ts";
+import { dateStr } from "../src/core/time.ts";
 import { resetCaptureCooldowns, resetSessionModels } from "../src/index.ts";
 import { RESTATABLE_TAG } from "../src/core/tags.ts";
 import { loadAll } from "../src/store/files/load.ts";
@@ -559,6 +561,95 @@ describe("capture availability tag (#389, #402)", () => {
     const rows = await rowsWith("av-contra");
     expect(rows.length).toBe(1);
     expect(rows[0]?.tags ?? []).not.toContain(RESTATABLE_TAG);
+  });
+
+  test("a dual-role verb does not mask a scope negation (#403 review round 1)", async () => {
+    // The union of the cue list with `polaritySigns` was applied to BOTH sides of
+    // the polarity comparison in `findClause`, and that comparison CREATES tags.
+    // `polaritySigns` reads the dual-role `removes` as negative in both strings,
+    // so the affirmative claim agreed with the sentence warning against it and was
+    // tagged as restating it — the round-3 reversal, arriving from the opposite
+    // direction. The comparison now uses the cue list alone; the union stays where
+    // the answer is absolute.
+    const repo = join(fixture.root, "dual-role");
+    mkdirSync(repo, { recursive: true });
+    writeFileSync(
+      repo + "/README.md",
+      "# T\n\nDo not assume the cleaner removes unused rows.\n",
+    );
+    git(repo, "init", "-q");
+    git(repo, "add", ".");
+    await capture(
+      repo,
+      [
+        {
+          type: "learning",
+          scope: "av-dual",
+          content: "The cleaner removes unused rows.",
+        },
+      ],
+      "ses-dual",
+    );
+    const rows = await rowsWith("av-dual");
+    // The row is stored — that is the invariant — and it is NOT demoted.
+    expect(rows.length).toBe(1);
+    expect(rows[0]?.tags ?? []).not.toContain(RESTATABLE_TAG);
+    expect(tagFor("av-dual")).toHaveLength(0);
+  });
+
+  test("the polarity union still declines a command the prose drops (#403 round 1)", async () => {
+    // The other half: the union is load-bearing where the answer is absolute.
+    // "Drop using" carries no cue-list negation, and `polaritySigns` reads `drop`
+    // as negative, so the manifest's declaration is refused as evidence. Narrowing
+    // the union everywhere would have re-opened that.
+    await capture(
+      makeRepo("union-kept"),
+      [
+        {
+          type: "learning",
+          scope: "av-union",
+          content: "Drop using `npm run deploy` from the loop.",
+        },
+      ],
+      "ses-union",
+    );
+    const rows = await rowsWith("av-union");
+    expect(rows.length).toBe(1);
+    expect(rows[0]?.tags ?? []).not.toContain(RESTATABLE_TAG);
+  });
+
+  test("a control character in a candidate does not reach the audit line raw (#403 review)", async () => {
+    // The candidate is a verbatim declared-command claim with a NUL appended: the
+    // availability matcher accepts it, because `norm()` neither strips nor requires
+    // the control character. Nothing between that verdict and the day log
+    // sanitises it — `scrubFields` only redacts credentials, and the logfmt writer
+    // escapes five characters. `memory_evidence` then returns the line to a model.
+    const sid = await capture(
+      makeRepo("ctl-chars"),
+      [
+        {
+          type: "pattern",
+          scope: "av-ctl",
+          content: "Ship with `npm run deploy`.\u0000",
+        },
+      ],
+      "ses-ctl",
+    );
+    const line = readEvidenceLog().find(
+      (l) => l.ev === "auto_capture_restatable" && String(l.session) === sid,
+    );
+    // Without this, every assertion below passes on a pass that recorded nothing.
+    expect(line).toBeDefined();
+    const C = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+    expect(String(line?.content)).not.toMatch(C);
+    expect(String(line?.matched)).not.toMatch(C);
+    // The raw day log, not just the parsed view: the whole point is bytes on disk.
+    const raw = readFileSync(join(evidenceDir(), `${dateStr()}.logfmt`), "utf8")
+      .split("\n")
+      .filter((l) => l.includes("auto_capture_restatable"))
+      .join("\n");
+    expect(raw).not.toMatch(C);
+    expect(raw).toContain("Ship with `npm run deploy`.");
   });
 
   // ── #402 P0: the scan is lazy and visible ──────────────────────────────────

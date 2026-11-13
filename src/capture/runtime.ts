@@ -761,16 +761,31 @@ export function configureAutoCapture(
                 scope: redactSecrets(c.scope),
                 reason: avail.reason,
                 where: avail.where,
-                matched: avail.matched,
+                // `matched` is a slice of the CANDIDATE, not of the tree, so it
+                // carries model prose too: measured, `Ship with \`npm run deploy\`.<NUL>`
+                // yields `matched` ending in the NUL. Flattened for the reason
+                // below.
+                matched: flattenMemoryText(avail.matched),
                 // The whole candidate, so the audit line alone can rebuild a row
                 // a later consolidation drops. It records the VERDICT, not proof
                 // of storage: this line is written before the gate, so a
                 // candidate the gate then refuses has one and no row. The row's
                 // fate is the adjacent `auto_capture_<action>` line, same pass,
                 // same type and scope; `restatements` on the scan line counts
-                // only rows that were really tagged. Redacted first, as every
-                // other capture line does.
-                content: redactSecrets(c.content),
+                // only rows that were really tagged.
+                //
+                // Both free-text fields here are flattened, which nothing else on
+                // this path does: `candidates.ts` checks type and scope for control
+                // characters but not content, `scrubFields` only redacts
+                // credentials, and the logfmt writer escapes `\ " \n \r \t` and
+                // nothing else. Without this, a NUL or U+2028 from model prose
+                // lands raw in the day log and `memory_evidence` hands it straight
+                // back to a model. Redact FIRST: flattening a PEM body would break
+                // the pattern that recognises it. The systemic version — flattening
+                // every string field in `scrubFields` — is deliberately NOT done
+                // here, because it would change the meaning of existing audit
+                // lines that carry multi-line values.
+                content: flattenMemoryText(redactSecrets(c.content)),
                 ...(c.guided ? { guided: true } : {}),
                 ...(modelTag ? { model: modelTag } : {}),
               },

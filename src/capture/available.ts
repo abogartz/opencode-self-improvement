@@ -36,9 +36,26 @@
 //     from `core/tokenize.ts`; see the two vetoes below for why the polarity
 //     check keeps its own cue list as well.
 //
-// The vetoes can only REMOVE a tag, never add one. Saltzer & Schroeder's
-// fail-safe principle, applied to a suppression filter: the default is keep, and
-// a bug must surface as a visible duplicate rather than as content that is gone.
+// The vetoes can only REMOVE a tag, never add one — which holds only because the
+// one place that compares two texts, `findClause`, compares them on the narrow
+// cue list. Widen that comparison and agreement gets easier, and an agreement is
+// what creates a tag; see VETO 1. Saltzer & Schroeder's fail-safe principle,
+// applied to a suppression filter: the default is keep, and a bug must surface as
+// a visible duplicate rather than as content that is gone.
+//
+// A wrong tag is not free either. The row survives, but `fitOrder` gives it up
+// first when the injection budget binds, so a false positive costs the row its
+// slot for the queries that needed it. That is the real price of a bad verdict,
+// and it is why the matcher is still held to the veto-only shape.
+//
+// Storing instead of deleting has a second consequence, and it is not a tag
+// effect. A stored row is a live GATE-3 contender, so a later write at >=0.9
+// overlap is now refused `superseded_overlap` where the delete policy would have
+// let it promote. Measured: an ordinary-tagged seed blocks the same write with
+// the same reason, so the tag changes nothing in the gate — the row being there
+// does. That is the gate working as designed on a genuine near-duplicate, with a
+// hint naming the row to `memory_update`, and it is the cost of no longer
+// destroying facts. P5 decides whether the check earns its keep at all.
 //
 // Fail-open is the rule throughout. A missing git, an unreadable file, a repo
 // that is not a repo, or a budget that ran out is NOT evidence that a fact is
@@ -178,8 +195,7 @@ const NEGATION =
 /**
  * VETO 1 (#402): is this sentence reversed?
  *
- * Two sources, unioned, because they answer different questions and the union is
- * strictly the safer one:
+ * Two sources, unioned, because they answer different questions:
  *
  *   - `NEGATION`, the cue list: "we do NOT use tabs" is negated prose.
  *   - `core/tokenize.ts`'s `polaritySigns`, which is NOT a negation detector and
@@ -191,11 +207,32 @@ const NEGATION =
  *     cannot see: the antonym pairs and the dual-role "never", so "must never
  *     disable" and "enable" do not read as the same claim.
  *
- * Both sides of the union can only REMOVE a tag, and since #402 a removed tag
- * costs nothing: the row is stored either way.
+ * USE THIS ONLY WHERE THE ANSWER IS ABSOLUTE. `forbidsCommand` asks "does this
+ * sentence forbid the command?" and a yes declines to tag, so widening it can
+ * only ever decline — the fail-safe direction.
+ *
+ * The relative use, where one text's polarity is compared with another's, is
+ * `cueNegated`, and the difference is not academic. Equality gets EASIER as both
+ * predicates get broader, and in `findClause` an agreement is what CREATES the
+ * tag. Measured on the round-3 case: tree `Do not assume the cleaner removes
+ * unused rows.`, candidate `The cleaner removes unused rows.` — `polaritySigns`
+ * reads the dual-role `removes` as negative in BOTH strings, the union agrees,
+ * and the affirmative claim is tagged as restating the sentence that warns
+ * against it. The cue list alone sees `not` on one side and nothing on the other
+ * and declines. That is the defect this veto exists for, arriving from the
+ * opposite direction.
  */
 function negated(text: string): boolean {
   return NEGATION.test(text) || polaritySigns(text).includes(POL_NEG);
+}
+
+/**
+ * Cue-list polarity, for the one place that COMPARES two texts. Narrow on
+ * purpose: a broader predicate here agrees more often, and every extra agreement
+ * is a tag.
+ */
+function cueNegated(text: string): boolean {
+  return NEGATION.test(text);
 }
 
 /**
@@ -486,7 +523,7 @@ function sentenceAt(text: string, start: number, len: number): string {
  * this file keeps the candidate.
  */
 function findClause(hay: string, clause: string): number {
-  const reversed = negated(clause);
+  const reversed = cueNegated(clause);
   for (let from = 0; ; ) {
     const i = hay.indexOf(clause, from);
     if (i < 0) return -1;
@@ -496,7 +533,7 @@ function findClause(hay: string, clause: string): number {
     if (
       !/\w/.test(String.fromCharCode(before)) &&
       !/\w/.test(String.fromCharCode(after)) &&
-      negated(sentenceAt(hay, i, clause.length)) === reversed
+      cueNegated(sentenceAt(hay, i, clause.length)) === reversed
     )
       return i;
     from = i + 1;
@@ -560,6 +597,10 @@ export function availabilityIndex(
   const slices: Slice[] = [];
   let bytes = 0;
   let loaded = 0;
+  // Set only when a file is actually SKIPPED, which is what the field claims: a
+  // final file that pushes the total past the cap sets nothing, because nothing
+  // was left behind. `bytes` counts decoded characters, not octets on disk — the
+  // budget is a work bound, not a disk measurement.
   let capped = false;
   for (const file of ranked) {
     if (bytes >= TOTAL_CAP) {
@@ -635,11 +676,12 @@ export function availabilityIndex(
         // no figure. So a sentence that forbids the command, or a number the
         // command does not carry, is a claim the declaration cannot answer.
         //
-        // These can only REMOVE a tag, and since #402 a removed tag costs
-        // nothing: the row is stored either way. That is the whole point of the
-        // change — the round-3 and round-4 arguments were really about a
-        // vocabulary that had to be perfect because a miss deleted a fact. Under
-        // a tag, a miss costs one row.
+        // These REMOVE a tag and never add one, and a removed tag costs the row
+        // nothing permanent: it is stored either way and a spare budget still
+        // shows it. That asymmetry is the whole point of the change — the round-3
+        // and round-4 arguments were really about a vocabulary that had to be
+        // perfect because a miss deleted a fact. Under a tag, a miss costs one
+        // injection slot.
         if (forbidsCommand(content, spans)) return null;
         if (introducesNewNumber(content, spans.join(" "))) return null;
         const undeclared = spans.some((s) => gateHit([s], gates) === null);

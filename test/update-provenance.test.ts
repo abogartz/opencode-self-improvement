@@ -84,6 +84,40 @@ describe("memory_update preserves omitted metadata (#154)", () => {
     expect(replacement.kw ?? []).toContain("queue retention");
   });
 
+  test("a prose edit drops `restatable`: the verdict described the old text (#403)", async () => {
+    // The tag asserts "the working tree states THIS prose". A correction changes
+    // the prose, so the verdict no longer describes anything — and unlike a
+    // merely wrong verdict, this one is wrong by construction while the row is
+    // still demoted first under a binding budget. The user fixes a stale fact and
+    // the fix is the row injection hides. Other provenance survives.
+    const pa = await plugin(a);
+    const original = await seedPlanRow(
+      a,
+      "The nightly prune job removes aged queue entries when they turn seven days old",
+      { tags: ["auto-capture", "restatable"] },
+    );
+    const result = await pa.tools.memory_update.execute(
+      {
+        type: "context",
+        scope: "planning",
+        query: original,
+        content:
+          "The nightly prune job keeps aged queue entries for a fortnight before removing them",
+        // "open" is the planning-object home this fixture uses: a settled claim
+        // with no code refs and no in-session engagement is refused by GATE-4 for
+        // reasons that have nothing to do with the tag under test.
+        status: "open",
+      },
+      ctx("ses-a"),
+    );
+    expect(result.content).toContain("Updated");
+    const replacement = (await loadAll()).find((m) =>
+      m.content.includes("fortnight"),
+    )!;
+    expect(replacement.tags ?? []).not.toContain("restatable");
+    expect(replacement.tags ?? []).toContain("auto-capture");
+  });
+
   test("control: explicit kw replaces rather than unions", async () => {
     const pa = await plugin(a);
     const original = await seedPlanRow(
