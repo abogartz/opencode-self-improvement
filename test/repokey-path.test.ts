@@ -29,6 +29,7 @@ import { appendMemory } from "../src/store/files/append.ts";
 import { resetState } from "../src/core/state.ts";
 import { relevantKnowledge } from "../src/recall/relevant.ts";
 import { dayFile } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const gitToplevel = (dir: string): string | null => {
   try {
@@ -80,7 +81,7 @@ beforeEach(() => {
 afterEach(() => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 describe("non-git repo keys are bare tokens (#92)", () => {
@@ -107,12 +108,7 @@ describe("non-git repo keys are bare tokens (#92)", () => {
         expect(scope.key).not.toBe(projDir);
       }
     } finally {
-      rmSync(projDir, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(projDir);
     }
   });
 
@@ -201,12 +197,7 @@ describe("case folding follows the volume, not the platform (#109)", () => {
         volumeFoldsCase(dir),
       );
     } finally {
-      rmSync(dir, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(dir);
     }
   });
 
@@ -219,12 +210,7 @@ describe("case folding follows the volume, not the platform (#109)", () => {
       if (volumeFoldsCase(base)) expect(n).toBe(n.toLowerCase());
       else expect(n).toContain("MixedCase");
     } finally {
-      rmSync(base, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(base);
     }
   });
 
@@ -246,12 +232,7 @@ describe("case folding follows the volume, not the platform (#109)", () => {
       if (caseSensitive) expect(lo).not.toBe(hi);
       else expect(lo).toBe(hi);
     } finally {
-      rmSync(base, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(base);
     }
   });
 
@@ -284,12 +265,7 @@ describe("case folding follows the volume, not the platform (#109)", () => {
       const hits = await relevantKnowledge("old fold platform stamp", 5);
       expect(hits).toContain("note stamped under the old platform fold");
     } finally {
-      rmSync(base, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(base);
     }
   });
 });
@@ -304,7 +280,7 @@ let aliasVolumeFolds: boolean;
 try {
   aliasVolumeFolds = volumeFoldsCase(aliasOracle);
 } finally {
-  rmSync(aliasOracle, { recursive: true, force: true });
+  removeStore(aliasOracle);
 }
 
 describe.skipIf(aliasVolumeFolds)(
@@ -351,12 +327,7 @@ describe.skipIf(aliasVolumeFolds)(
           setRepoScope(other);
           expect(await relevantKnowledge(content, 5)).not.toContain(content);
         } finally {
-          rmSync(base, {
-            recursive: true,
-            force: true,
-            maxRetries: 5,
-            retryDelay: 20,
-          });
+          removeStore(base);
         }
       },
     );

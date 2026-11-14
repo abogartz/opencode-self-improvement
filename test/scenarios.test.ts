@@ -8,7 +8,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,6 +27,7 @@ import {
 import { resetState, setCurrent } from "../src/core/state.ts";
 import { rememberSessionDir } from "../src/identity/repokey.ts";
 import { readEvidenceLog as evidence, ev, field } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let liveRoot: string;
@@ -43,7 +43,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 function seed(

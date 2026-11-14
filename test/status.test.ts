@@ -3,13 +3,7 @@
 // the /memory TUI panel reads the same files). Also /memory-report command
 // install parity.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -51,6 +45,7 @@ import { createInjectionEpochs } from "../src/inject/epochs.ts";
 import { hitsFile } from "../src/hits/ledger.ts";
 import { loadPlugin } from "./harness.ts";
 import { resetState } from "../src/core/state.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 
@@ -66,7 +61,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 const payload = (over: Partial<StatusPayload> = {}): StatusPayload => ({

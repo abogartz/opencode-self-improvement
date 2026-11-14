@@ -26,6 +26,7 @@ import { prune } from "../src/store/files/prune.ts";
 import { snapshotFiles } from "../src/store/files/snapshots.ts";
 import { listSnapshots, restoreSnapshot } from "../src/store/undo.ts";
 import { loadPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const DAY = "2026-01-01";
 let root: string;
@@ -40,7 +41,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 const store = () => join(memoryRoot(), `${DAY}.logfmt`);
@@ -275,7 +276,7 @@ describe("snapshot containment", () => {
         throw err;
       // Windows requires Developer Mode/admin for file symlinks. Directory
       // junctions need no elevation and exercise the same realpath escape.
-      rmSync(snapshotDir(), { recursive: true });
+      removeStore(snapshotDir());
       symlinkSync(join(root, "outside"), snapshotDir(), "junction");
     }
 

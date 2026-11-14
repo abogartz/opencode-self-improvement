@@ -11,13 +11,7 @@
 // that file covers WINDOW determinism (interleavings inside one operation,
 // where only real processes plus rewrite windows are honest).
 import { expect } from "bun:test";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { memoryRoot, snapshotDir } from "../../src/core/config/paths.ts";
@@ -28,6 +22,7 @@ import { rememberSessionDir } from "../../src/identity/repokey.ts";
 import { resetState, setCurrent } from "../../src/core/state.ts";
 import { startViewer, type ViewerServer } from "../../src/viewer/server.ts";
 import { loadPlugin, type LoadedPlugin } from "../harness.ts";
+import { removeStore } from "../helpers/remove-store.ts";
 
 export interface StoreRow {
   ts: string;
@@ -276,12 +271,7 @@ export async function startScripted(): Promise<Scripted> {
       vm.server.stop();
       await p.cleanup();
       delete process.env.OPENCODE_MEMORY_DIR;
-      rmSync(root, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(root);
     },
   };
 }

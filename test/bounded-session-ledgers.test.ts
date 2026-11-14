@@ -10,7 +10,7 @@
 //     core/lru.ts, so the two caps cannot drift.
 // Hermetic: temp OPENCODE_MEMORY_DIR.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SESSION_CAP } from "../src/core/lru.ts";
@@ -32,6 +32,7 @@ import {
   setRepoScope,
 } from "../src/identity/repokey.ts";
 import { ev, readEvidenceLog as evidence } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 // Pinned literal of src/capture/triggers.ts's CALLS_CAP (#224), captured the
 // way boundaries.test.ts captures the wire contract: a deliberate move of the
@@ -52,7 +53,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 test("sessions Map evicts beyond SESSION_CAP; an evicted session starts over", () => {

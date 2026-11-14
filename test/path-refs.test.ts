@@ -4,11 +4,12 @@
 // (bare names, absolute, ~, $VAR, URLs, `..`) are trusted as before and never
 // produce a block.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkablePathRefs, gate1 } from "../src/gate/resolver.ts";
 import { runWriteGate, type GateContext } from "../src/gate/gate.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 describe("checkablePathRefs — which refs are policed", () => {
   test("repo-qualified paths are checkable; line suffix stripped", () => {
@@ -73,12 +74,7 @@ describe("gate1 — existence check against liveRoot", () => {
   });
 
   afterEach(() => {
-    rmSync(root, {
-      recursive: true,
-      force: true,
-      maxRetries: 5,
-      retryDelay: 20,
-    });
+    removeStore(root);
   });
 
   const run = (content: string) =>
@@ -134,12 +130,7 @@ describe("runWriteGate — ref_path_missing block", () => {
 
   afterEach(() => {
     delete process.env.OPENCODE_MEMORY_DIR;
-    rmSync(root, {
-      recursive: true,
-      force: true,
-      maxRetries: 5,
-      retryDelay: 20,
-    });
+    removeStore(root);
   });
 
   const ctx = (): GateContext => ({

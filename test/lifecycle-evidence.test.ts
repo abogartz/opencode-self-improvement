@@ -1,11 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { evidenceDir } from "../src/core/config/paths.ts";
@@ -23,6 +17,7 @@ import {
 } from "../src/identity/repokey.ts";
 import { resetState, setCurrent } from "../src/core/state.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string, a: string, b: string;
 let plugins: LoadedPlugin[];
@@ -64,7 +59,7 @@ afterEach(async () => {
     if (saved[key] === undefined) delete process.env[key];
     else process.env[key] = saved[key];
   }
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 }, 30_000);
 async function plugin(dir: string, capture = false) {
   const p = await loadPlugin(

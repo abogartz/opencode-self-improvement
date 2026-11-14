@@ -20,7 +20,7 @@
 //      removes the store right after cleanup sees nothing straggling.
 // Hermetic: temp OPENCODE_MEMORY_DIR / OPENCODE_COMMANDS_DIR.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resetState } from "../src/core/state.ts";
@@ -30,6 +30,7 @@ import { loadAll } from "../src/store/files/load.ts";
 import { isActive } from "../src/store/model/predicates.ts";
 import { type LoadedPlugin, loadPlugin } from "./harness.ts";
 import { readEvidenceLog, sleep } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let plugin: LoadedPlugin | undefined;
@@ -52,7 +53,7 @@ afterEach(async () => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {

@@ -4,7 +4,6 @@ import {
   mkdtempSync,
   readFileSync,
   renameSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,6 +18,7 @@ import { importMemories } from "../src/portable/import.ts";
 import { readStatus, statusFile } from "../src/status/write.ts";
 import { resetState } from "../src/core/state.ts";
 import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let old: string | undefined;
@@ -45,7 +45,7 @@ afterEach(() => {
     !basename(root).startsWith("osi-complete-reads-")
   )
     throw new Error("Unexpected fixture root");
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 const day = () => join(root, "2026-10-29.logfmt");
 const row = (ts: string, content: string) =>

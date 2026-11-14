@@ -5,7 +5,7 @@
 // new export, so it is branch-only (the RED scenario lives in
 // status-blocked-visibility-306.test.ts).
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -19,6 +19,7 @@ import { dateStr } from "../src/core/time.ts";
 import { formatLine } from "../src/core/logfmt/format.ts";
 import { readerFromSid, type Reader } from "../src/store/model/visibility.ts";
 import { blockedReaderFor, blockedRecent } from "../src/status/write.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let a: string;
@@ -39,7 +40,7 @@ afterEach(() => {
   resetState();
   resetSessionScopes();
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 function seedBlocked(

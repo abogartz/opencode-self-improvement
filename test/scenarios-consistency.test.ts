@@ -41,7 +41,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,6 +55,7 @@ import { EXPORT_HEADER, EXPORT_VERSION } from "../src/portable/export.ts";
 import { importMemories } from "../src/portable/import.ts";
 import { restoreSnapshot } from "../src/store/undo.ts";
 import { startViewer, type ViewerServer } from "../src/viewer/server.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const SRC = join(import.meta.dir, "..", "src");
 
@@ -73,7 +73,7 @@ beforeEach(async () => {
 afterEach(() => {
   vm.server.stop();
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 const store = () => join(memoryRoot(), `${dateStr()}.logfmt`);

@@ -1,7 +1,7 @@
 // #45 through the shipped tool: memory_consolidate proposes, reports, and never
 // writes. The store before and after the call must be byte-identical.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import { loadAll } from "../src/store/files/load.ts";
 import { recordHits } from "../src/hits/ledger.ts";
 import { loadPlugin } from "./harness.ts";
 import { resetState } from "../src/core/state.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 
@@ -23,7 +24,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 const A =

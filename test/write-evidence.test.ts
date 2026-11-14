@@ -2,7 +2,7 @@
 // and attribution keep the complete session ledger. Exercise the real tool
 // entry point so a fix only in a test-built GateContext cannot pass.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { evidenceDir } from "../src/core/config/paths.ts";
@@ -15,6 +15,7 @@ import { blockedRecent } from "../src/status/write.ts";
 import { afterTool, callsFor } from "../src/capture/triggers.ts";
 import { startViewer } from "../src/viewer/server.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let loaded: LoadedPlugin;
@@ -44,7 +45,7 @@ afterEach(async () => {
   else process.env.OPENCODE_MEMORY_DIR = oldMemory;
   if (oldCommands === undefined) delete process.env.OPENCODE_COMMANDS_DIR;
   else process.env.OPENCODE_COMMANDS_DIR = oldCommands;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 async function call(

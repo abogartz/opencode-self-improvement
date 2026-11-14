@@ -9,13 +9,7 @@
 // Global (explicit or unstamped) rows stay mergeable from anywhere; that is
 // now stated in the tool contract instead of granted implicitly.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { evidenceDir } from "../src/core/config/paths.ts";
@@ -36,6 +30,7 @@ import {
   setRepoScope,
 } from "../src/identity/repokey.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let a: string;
@@ -63,7 +58,7 @@ afterEach(async () => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 // Rows are seeded with an EXPLICIT repo stamp (ambient scope is null while

@@ -8,13 +8,7 @@
 // the target's repo and to the admin reader; an edit of a `repo=global` row
 // still reads as global.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import {
-  appendFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-} from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
@@ -31,6 +25,7 @@ import { dateStr } from "../src/core/time.ts";
 import { formatLine, parseLine } from "../src/core/logfmt/format.ts";
 import { editMemory, releaseQuarantinedMemory } from "../src/viewer/mutate.ts";
 import { addBlock } from "../src/store/blocklist.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 import {
   ADMIN_READER,
   evidenceVisibleTo,
@@ -65,7 +60,7 @@ afterEach(async () => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 function seed(

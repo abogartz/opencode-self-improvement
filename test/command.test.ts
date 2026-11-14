@@ -7,13 +7,13 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
-  rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin } from "./harness.ts";
 import { resetState } from "../src/core/state.ts";
 import { ensureCommand } from "../src/command/ensure.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let commandsDirPath: string;
 let root: string;
@@ -27,7 +27,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 describe("ensureInitCommand", () => {

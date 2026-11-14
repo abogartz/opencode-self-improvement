@@ -7,16 +7,7 @@
 // #223: a non-loopback bind or allowed host mints a startup token (0600, in
 // the store root) and every request must present it; loopback stays open.
 import { basename, join } from "node:path";
-import {
-  closeSync,
-  constants,
-  linkSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { linkSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { isIP } from "node:net";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { serve, type Server } from "bun";
@@ -36,6 +27,7 @@ import {
   snapshotDir,
 } from "../core/config/paths.ts";
 import { blockedEntries } from "../store/blocklist.ts";
+import { LOCK_WRITE, withStoreLock } from "../store/lock.ts";
 import { listSnapshots, restoreSnapshot } from "../store/undo.ts";
 import { appendMemory } from "../store/files/append.ts";
 import { loadAll, memoryFiles } from "../store/files/load.ts";
@@ -190,56 +182,34 @@ async function mintTokenOnce(): Promise<string> {
   }
 }
 
-// Repair a corrupt token file under an O_EXCL lock (F1 residual, #223
-// review): exactly one starter replaces the file, the rest adopt its token.
-// The lock also keeps Windows from renaming onto a file a rival starter is
-// mid-read — the observed EPERM. A holder that crashes must not wedge every
-// later start, so a lock older than the wait window is stolen and retried.
-const RECOVER_WAIT_MS = 5_000;
-const RECOVER_STALE_MS = 15_000;
-
+// Repair a corrupt token file: exactly one starter replaces the file and the
+// rest adopt its token (F1 residual, #223 review). The repair also keeps Windows
+// from renaming onto a file a rival starter is mid-read — the observed EPERM.
+//
+// It takes the STORE's lock to do it. It used to take its own O_EXCL
+// `.recover` file, which is the #407 shape exactly: the state of the lock lived
+// in a directory entry, and on Windows that entry outlives the holder whenever
+// a third-party handle is open without FILE_SHARE_DELETE. The age-based steal
+// here could not rescue that case either, because the steal is itself an unlink
+// and the same refusal applies to it — a viewer that hit it could never start
+// again.
 async function recoverCorruptToken(
   path: string,
   tmp: string,
   token: string,
 ): Promise<string> {
-  const lock = path + ".recover";
-  const deadline = Date.now() + RECOVER_WAIT_MS;
-  for (;;) {
-    let held = false;
-    try {
-      closeSync(
-        openSync(
-          lock,
-          constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
-          0o600,
-        ),
-      );
-      held = true;
+  return withStoreLock(
+    path,
+    async () => {
+      // Re-read inside the lock: a rival repair may have completed while this
+      // call waited, and its token is the one URLs in this store already carry.
       const settled = readToken(path);
       if (TOKEN_SHAPE.test(settled)) return settled;
       renameSync(tmp, path);
       return token;
-    } catch (err) {
-      if (held || (err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      const waiting = readToken(path);
-      if (TOKEN_SHAPE.test(waiting)) return waiting;
-      if (Date.now() < deadline) {
-        await Bun.sleep(25);
-        continue;
-      }
-      let stale = true;
-      try {
-        stale = Date.now() - statSync(lock).mtimeMs > RECOVER_STALE_MS;
-      } catch {
-        stale = true;
-      }
-      if (!stale) throw err;
-      rmSync(lock, { force: true });
-    } finally {
-      if (held) rmSync(lock, { force: true });
-    }
-  }
+    },
+    LOCK_WRITE,
+  );
 }
 
 function tokenMatches(candidate: string, expected: string): boolean {

@@ -38,7 +38,9 @@ import { sharedTerms } from "../src/recall/shared-terms.ts";
 import { ledgerIsYoung } from "../src/status/metrics.ts";
 import { renderMemoryReport } from "../src/status/report.ts";
 import type { Memory } from "../src/store/model/memory.ts";
-import { LOCK_WRITE, lockFileFor, withStoreLock } from "../src/store/lock.ts";
+import { LOCK_WRITE, withStoreLock } from "../src/store/lock.ts";
+import { childHolder } from "./helpers/hold-cross-process.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 
@@ -52,7 +54,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 const ledgerText = () => readFileSync(hitsFile(), "utf8");
@@ -131,8 +133,10 @@ describe("the throttle", () => {
     const originalBudget = LOCK_WRITE.timeoutMs;
     const originalEvent = LOCK_WRITE.onEvent;
     const events: string[] = [];
-    // No in-process holder: this forces the O_EXCL lock-file path.
-    writeFileSync(lockFileFor(hitsFile()), "external-holder");
+    // No in-process holder: this forces the cross-process wait, which is what
+    // #210 throttles. A live rival process is the only honest fixture now —
+    // the lock is a kernel record, not a file a test can create by hand.
+    const holder = await childHolder(hitsFile());
     LOCK_WRITE.timeoutMs = 40;
     LOCK_WRITE.onEvent = (event) => {
       events.push(event);
@@ -154,7 +158,7 @@ describe("the throttle", () => {
     } finally {
       LOCK_WRITE.timeoutMs = originalBudget;
       LOCK_WRITE.onEvent = originalEvent;
-      rmSync(lockFileFor(hitsFile()), { force: true });
+      await holder.release();
     }
     expect(
       await recordHits(
@@ -359,7 +363,7 @@ describe("use signals and the honest window", () => {
     expect(ledger.byRow.get(original!.ts)?.count).toBe(1);
 
     // "Prune" (delete the day file) and re-capture the same fact.
-    rmSync(memoryRoot(), { recursive: true, force: true });
+    removeStore(memoryRoot());
     mkdirSync(memoryRoot(), { recursive: true });
     resetLedgerCache();
     // appendMemory stamps `ts` from the wall clock at millisecond resolution

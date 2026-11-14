@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import * as evidence from "../src/evidence/record.ts";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
@@ -28,7 +22,7 @@ import { contentHash } from "../src/evidence/record.ts";
 import {
   LOCK_RESTORE,
   LOCK_WRITE,
-  lockFileFor,
+  setLockBusyInjector,
   withStoreLock,
 } from "../src/store/lock.ts";
 import { restoreSnapshot } from "../src/store/undo.ts";
@@ -37,6 +31,8 @@ import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
 import { resetState } from "../src/core/state.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
+import { lockIdentity } from "./helpers/lock-identity.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let plugins: LoadedPlugin[];
@@ -91,7 +87,7 @@ afterEach(async () => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
   expect(evidenceErrors).toEqual([]);
 }, 30_000);
 function seed(ts: string, content: string) {
@@ -112,33 +108,30 @@ async function plugin() {
   plugins.push(p);
   return p;
 }
+/**
+ * Run `run` with acquisitions of `file` refused, as if another writer held it.
+ *
+ * This used to hold a real in-process lock on `file`, which worked when each day
+ * file had its own lock. The lock is per store directory now (#407), so holding
+ * one day file holds every one of them and the batch under test could never
+ * reach the second file it is supposed to lose. The refusal is injected at the
+ * acquisition instead — same timeout policy, same busy message — and the real
+ * cross-process case is pinned in lock.test.ts.
+ */
 async function held(file: string, run: () => Promise<void>) {
-  let enter!: () => void;
-  let release!: () => void;
-  const entered = new Promise<void>((r) => {
-    enter = r;
-  });
-  const released = new Promise<void>((r) => {
-    release = r;
-  });
-  const holder = withStoreLock(
-    file,
-    async () => {
-      enter();
-      await released;
-    },
-    LOCK_WRITE,
-  );
-  await entered;
-  const owner = readFileSync(lockFileFor(file), "utf8");
+  // Warm the lock artifact first: the identity below has to be captured against
+  // an existing database, not "absent".
+  await withStoreLock(file, async () => undefined, LOCK_WRITE);
+  const owner = lockIdentity(file);
+  setLockBusyInjector((target) => target === file);
   try {
     await run();
-    expect(readFileSync(lockFileFor(file), "utf8")).toBe(owner);
+    expect(lockIdentity(file)).toBe(owner);
   } finally {
-    release();
-    await holder;
+    setLockBusyInjector();
   }
 }
+
 const ctx = { sessionID: "partial-lock", id: "partial-lock-call" };
 
 // A starved ubuntu/Windows --parallel=4 worker can spend real time past Bun's

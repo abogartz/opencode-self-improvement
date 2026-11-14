@@ -2,7 +2,7 @@
 // session hooks) and the memory-first prompt injection works. This is what
 // "install from scratch as an opencode extension" depends on.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pluginDefault, { SelfImprovement } from "../index.ts";
@@ -10,6 +10,7 @@ import { memoryRoot } from "../src/core/config/paths.ts";
 import { formatLine } from "../src/core/logfmt/format.ts";
 import { resetState } from "../src/core/state.ts";
 import { loadPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 
@@ -22,7 +23,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 const dir = () => join(process.env.OPENCODE_MEMORY_DIR!, "..", "repo");

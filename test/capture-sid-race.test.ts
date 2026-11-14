@@ -15,7 +15,7 @@
 // write path necessarily sees the other session.
 // Hermetic: temp OPENCODE_MEMORY_DIR; two dirs bound as distinct repo scopes.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { memoryRoot } from "../src/core/config/paths.ts";
@@ -33,6 +33,7 @@ import {
 import { resetState, setCurrent } from "../src/core/state.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
 import { readEvidenceLog as evidence, sleep } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let liveRoot: string;
@@ -64,7 +65,7 @@ afterEach(() => {
   resetState();
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 async function waitFor(cond: () => boolean, timeoutMs = 4000): Promise<void> {

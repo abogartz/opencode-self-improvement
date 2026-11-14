@@ -4,13 +4,7 @@
 // row rewrote correct code (raw row) and framing alone stayed a coin flip.
 // Hermetic: temp OPENCODE_MEMORY_DIR + temp repo dirs, nothing real touched.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -33,6 +27,7 @@ import { capToBudget, injectedRows } from "../src/inject/budget.ts";
 import { formatMemory } from "../src/inject/format.ts";
 import { createInjectionEpochs } from "../src/inject/epochs.ts";
 import { afterTool } from "../src/capture/triggers.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let repo: string;
@@ -47,7 +42,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 function writeSrc(name: string, text: string): void {

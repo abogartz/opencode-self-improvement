@@ -9,11 +9,12 @@
 // it delegates to the real module unless a test arms a ts, and afterEach
 // empties the armed set.
 import { afterEach, beforeEach, describe, expect, test, mock } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { memoryRoot } from "../src/core/config/paths.ts";
 import { formatLine } from "../src/core/logfmt/format.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const realModule = await import("../src/store/files/supersede.ts");
 const real = { ...realModule };
@@ -78,7 +79,7 @@ beforeEach(() => {
 afterEach(() => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 const ctx = (): GateContext => ({

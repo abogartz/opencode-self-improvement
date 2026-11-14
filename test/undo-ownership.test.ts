@@ -5,7 +5,7 @@
 // #143's export breadth: authorization belongs to the entry point, and every
 // mode (check/merge/force) must leave foreign rows exactly where they are.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
@@ -20,6 +20,7 @@ import {
   setRepoScope,
 } from "../src/identity/repokey.ts";
 import { resetState } from "../src/core/state.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let a: string;
@@ -53,7 +54,7 @@ afterEach(async () => {
   ) {
     throw new Error("Unexpected fixture cleanup path");
   }
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 async function plugin(dir: string | null) {

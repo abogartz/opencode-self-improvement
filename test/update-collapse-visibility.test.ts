@@ -1,7 +1,7 @@
 // #175: a duplicate survivor must be visible to the call's captured reader
 // and preserve the target's visibility to other readers, including path fallback.
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { runWriteGate } from "../src/gate/gate.ts";
@@ -25,6 +25,7 @@ import {
 import { resetState, setCurrent } from "../src/core/state.ts";
 import { tombstone } from "../src/store/tombstones/tombstone.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const envKeys = ["OPENCODE_MEMORY_DIR", "OPENCODE_COMMANDS_DIR"] as const;
 const oldProse = "Plan to rotate service certificates every Monday";
@@ -72,7 +73,7 @@ afterEach(async () => {
   ) {
     throw new Error("Unexpected fixture cleanup target");
   }
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 function git(dir: string, ...args: string[]): void {

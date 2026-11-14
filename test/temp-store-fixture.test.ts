@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { withTempStore } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 beforeEach(() => {
@@ -37,18 +38,23 @@ afterEach(() => {
       }
       try {
         if (lstatSync(childRoot).isSymbolicLink()) unlinkSync(childRoot);
-        else rmSync(childRoot, { recursive: true, force: true });
+        else removeStore(childRoot);
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
       }
     }
   }
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 function runFixture(mode: string, environment = "existing") {
   const file = join(root, "fixture.test.ts");
   const harness = pathToFileURL(join(import.meta.dir, "harness.ts")).href;
+  // The generated fixture lives in a temp directory, so it imports the helper
+  // by absolute URL, exactly like the harness and the append module.
+  const removeStoreMod = pathToFileURL(
+    join(import.meta.dir, "helpers", "remove-store.ts"),
+  ).href;
   const state = pathToFileURL(
     join(import.meta.dir, "..", "src/core/state.ts"),
   ).href;
@@ -62,6 +68,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { withTempStore } from ${JSON.stringify(harness)};
+import { removeStore } from ${JSON.stringify(removeStoreMod)};
 import { authoredFor, getCurrent, noteAuthored, setCurrent } from ${JSON.stringify(state)};
 import { appendMemory } from ${JSON.stringify(append)};
 
@@ -99,7 +106,7 @@ describe("resources finish before outer fixture cleanup", () => {
     expect(getCurrent().sid).toBe("?");
     expect(authoredFor("dirty").size).toBe(0);
     if (mode === "redirect") {
-      rmSync(store.root, { recursive: true, force: true });
+      removeStore(store.root);
       symlinkSync(process.env.OSI_FIXTURE_TARGET, store.root, process.platform === "win32" ? "junction" : "dir");
       return;
     }

@@ -8,7 +8,7 @@
 // only exports that exist on main so it fails for exactly the stated reason;
 // the new reader helper is pinned in status-blocked-reader-306.test.ts.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
@@ -24,6 +24,7 @@ import { dateStr } from "../src/core/time.ts";
 import { formatLine } from "../src/core/logfmt/format.ts";
 import { ADMIN_READER } from "../src/store/model/visibility.ts";
 import { blockedRecent } from "../src/status/write.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let a: string;
@@ -51,7 +52,7 @@ afterEach(async () => {
   resetSessionScopes();
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 // One write_blocked evidence line, stamped like the gate writes it in a

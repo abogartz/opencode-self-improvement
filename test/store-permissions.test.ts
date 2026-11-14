@@ -20,7 +20,11 @@ import {
   writeAtomic,
 } from "../src/core/logfmt/publish.ts";
 import { snapshotFiles } from "../src/store/files/snapshots.ts";
-import { withStoreLock, lockFileFor, LOCK_WRITE } from "../src/store/lock.ts";
+import {
+  withStoreLock,
+  lockDatabaseFor,
+  LOCK_WRITE,
+} from "../src/store/lock.ts";
 import { preparePrivateFile } from "../src/core/permissions.ts";
 import {
   readStatus,
@@ -29,6 +33,7 @@ import {
   sessionStatusFile,
 } from "../src/status/write.ts";
 import type { StatusPayload } from "../src/status/payload.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 // Windows chmod does not represent ACL privacy. Exercise these guarantees on
 // POSIX with a permissive umask, rather than passing vacuous Windows checks.
@@ -50,7 +55,7 @@ describe.skipIf(process.platform === "win32")("private store modes", () => {
     process.umask(oldMask);
     if (oldDir === undefined) delete process.env.OPENCODE_MEMORY_DIR;
     else process.env.OPENCODE_MEMORY_DIR = oldDir;
-    rmSync(parent, { recursive: true, force: true });
+    removeStore(parent);
   });
 
   test("resolving an existing store protects its root without changing its parent or rewriting history", () => {
@@ -109,13 +114,19 @@ describe.skipIf(process.platform === "win32")("private store modes", () => {
     }
   });
 
-  test("the first lock creates a private store directory and lock file", async () => {
+  test("the first lock creates a private store directory and lock files", async () => {
     const file = join(root, "day.logfmt");
     await withStoreLock(
       file,
       async () => {
         expect(mode(root)).toBe(0o700);
-        expect(mode(lockFileFor(file))).toBe(0o600);
+        // The lock is a SQLite database, so its WAL sidecars belong to the same
+        // private surface: -wal holds the rows that are not checkpointed yet,
+        // and a world-readable -wal leaks the store while the lock is held.
+        const db = lockDatabaseFor(file);
+        expect(mode(db)).toBe(0o600);
+        expect(mode(db + "-wal")).toBe(0o600);
+        expect(mode(db + "-shm")).toBe(0o600);
       },
       LOCK_WRITE,
     );

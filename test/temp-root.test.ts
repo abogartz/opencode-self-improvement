@@ -4,10 +4,11 @@
 // and every guarded child exited 2 against its own perfectly temporary
 // store. Both directions are pinned here — passing and refusing.
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { removeStore } from "./helpers/remove-store.ts";
 
 describe("requireTempPath", () => {
   test("accepts a path under the system temp dir, whatever the separator", () => {
@@ -25,12 +26,7 @@ describe("requireTempPath", () => {
       expect(child.exitCode).toBe(0);
       expect(child.stderr.toString()).toBe("");
     } finally {
-      rmSync(root, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(root);
     }
   });
 

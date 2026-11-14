@@ -6,7 +6,7 @@
 // GATE-3 rivalry cannot cover this: it competes only decision/preference rows,
 // and corrections of remembered facts are context/learning.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadAll } from "../src/store/files/load.ts";
@@ -16,6 +16,7 @@ import { symbolValues, valueConflicts } from "../src/gate/value-conflict.ts";
 import { setRepoScope } from "../src/identity/repokey.ts";
 import type { Memory } from "../src/store/model/memory.ts";
 import { readEvidenceLog } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const mem = (
   ts: string,
@@ -303,12 +304,7 @@ describe("the gate retires a corrected row in the data", () => {
   afterEach(() => {
     setRepoScope(null);
     delete process.env.OPENCODE_MEMORY_DIR;
-    rmSync(root, {
-      recursive: true,
-      force: true,
-      maxRetries: 5,
-      retryDelay: 20,
-    });
+    removeStore(root);
   });
 
   const write = (content: string, extra: Record<string, unknown> = {}) =>

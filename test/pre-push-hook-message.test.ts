@@ -5,6 +5,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const hookPath = join(import.meta.dir, "..", ".githooks", "pre-push");
 
@@ -60,7 +61,7 @@ test.skipIf(!Bun.which("sh"))(
       expect(out).toMatch(/pull request/i);
       expect(falseCiClaims(out)).toEqual([]);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      removeStore(cwd);
     }
   },
 );

@@ -4,13 +4,7 @@
 // the JSONL the credential. Redaction here happens on the value being
 // serialised, never on the row: export stays a read path.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  appendFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-} from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { memoryRoot } from "../src/core/config/paths.ts";
@@ -24,6 +18,7 @@ import {
 import { loadAll } from "../src/store/files/load.ts";
 import { resetState } from "../src/core/state.ts";
 import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 beforeEach(() => {
@@ -41,7 +36,7 @@ afterEach(() => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 // A legacy row, written straight to the day file the way pre-#67 code did:

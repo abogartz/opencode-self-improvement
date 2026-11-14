@@ -7,13 +7,7 @@
 // that split, so half of these tests pin the OTHER half: a keyword must never
 // reach the model's context, cost a character, or forge a line.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  appendFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-} from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { memoryRoot } from "../src/core/config/paths.ts";
@@ -35,6 +29,7 @@ import { setRepoScope } from "../src/identity/repokey.ts";
 import type { Memory } from "../src/store/model/memory.ts";
 import { loadPlugin } from "./harness.ts";
 import { dayFile } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 
@@ -47,7 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 function seedAt(

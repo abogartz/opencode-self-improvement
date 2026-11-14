@@ -5,12 +5,13 @@
 // The test parses the filter literally out of the tool's own output text and
 // replays it, so the hint can never drift from the evidence schema again.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
 import { resetState } from "../src/core/state.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let loaded: LoadedPlugin;
@@ -40,7 +41,7 @@ afterEach(async () => {
   else process.env.OPENCODE_MEMORY_DIR = oldMemory;
   if (oldCommands === undefined) delete process.env.OPENCODE_COMMANDS_DIR;
   else process.env.OPENCODE_COMMANDS_DIR = oldCommands;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 test("a blocked write's hint names a memory_evidence filter that returns the blocked row", async () => {

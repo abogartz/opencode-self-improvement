@@ -7,7 +7,7 @@
 // COMPLETE transcript first, then applies the character budget. The proof is
 // the prompt actually handed to the capture model.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { flattenTranscript } from "../src/capture/transcript.ts";
@@ -17,6 +17,7 @@ import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
 import { sleep } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let plugin: LoadedPlugin | undefined;
@@ -49,7 +50,7 @@ afterEach(async () => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {

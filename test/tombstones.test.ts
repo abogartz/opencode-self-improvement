@@ -26,7 +26,7 @@
 //
 // Hermetic like the rest of the suite: temp OPENCODE_MEMORY_DIR, no repo touch.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -55,6 +55,7 @@ import {
 import { blockMemory, unblockMemory } from "../src/viewer/mutate.ts";
 import { blockedEntries } from "../src/store/blocklist.ts";
 import { loadPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "osi-tomb-"));
@@ -69,7 +70,7 @@ afterEach(() => {
   resetSessionScopes();
   resetState();
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 let root: string;

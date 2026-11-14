@@ -3,7 +3,7 @@
 // the system digest, the open-first tie-break, and the frontier_injected
 // evidence line. Hermetic: temp OPENCODE_MEMORY_DIR, throwaway live tree.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { evidenceDir } from "../src/core/config/paths.ts";
@@ -17,6 +17,7 @@ import { relevantKnowledge } from "../src/recall/relevant.ts";
 import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
 import { resetState } from "../src/core/state.ts";
 import { readEvidenceLog as evidence } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let liveRoot: string;
@@ -37,7 +38,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 function ctx(): GateContext {

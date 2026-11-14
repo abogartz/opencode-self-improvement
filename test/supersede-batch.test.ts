@@ -16,7 +16,6 @@ import {
   openSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,6 +29,7 @@ import {
 import { formatLine } from "../src/core/logfmt/format.ts";
 import { setRepoScope } from "../src/identity/repokey.ts";
 import { dayFile } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 beforeEach(() => {
@@ -40,7 +40,7 @@ beforeEach(() => {
 afterEach(() => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 const memDir = () => process.env.OPENCODE_MEMORY_DIR!;

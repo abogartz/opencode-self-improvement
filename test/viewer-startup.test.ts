@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeStore } from "./helpers/remove-store.ts";
 
 describe("viewer exposure warning (#13)", () => {
   test.each([
@@ -115,12 +116,7 @@ describe("viewer exposure warning (#13)", () => {
         expect(existsSync(tokenFile)).toBe(false);
       }
     } finally {
-      rmSync(root, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(root);
     }
   });
 });

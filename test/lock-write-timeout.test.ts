@@ -1,14 +1,14 @@
 // #196: a timed-out writer must not acknowledge a mutation that the current
 // lock holder can overwrite. Handshakes fix the ordering; no slow-disk race.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendMemory } from "../src/store/files/append.ts";
 import { loadAll } from "../src/store/files/load.ts";
 import { markSuperseded } from "../src/store/files/supersede.ts";
 import { addBlock, blocklistFile } from "../src/store/blocklist.ts";
-import { LOCK_WRITE, lockFileFor, withStoreLock } from "../src/store/lock.ts";
+import { LOCK_WRITE, withStoreLock } from "../src/store/lock.ts";
 import { writeAtomic } from "../src/core/logfmt/publish.ts";
 import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
 import { resetState } from "../src/core/state.ts";
@@ -19,6 +19,8 @@ import {
   tombstones,
 } from "../src/store/tombstones/tombstone.ts";
 import { contentHash } from "../src/evidence/record.ts";
+import { lockIdentity } from "./helpers/lock-identity.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 const originalRoot = process.env.OPENCODE_MEMORY_DIR;
@@ -38,7 +40,7 @@ afterEach(() => {
   setRepoScope(null);
   if (originalRoot === undefined) delete process.env.OPENCODE_MEMORY_DIR;
   else process.env.OPENCODE_MEMORY_DIR = originalRoot;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 function deferred() {
@@ -116,7 +118,7 @@ test("a queued append refuses a busy store, preserves the holder, and succeeds o
   const { file } = await seed();
   const before = readFileSync(file, "utf8");
   const h = await holdRewrite(file);
-  const owner = readFileSync(lockFileFor(file), "utf8");
+  const owner = lockIdentity(file);
   const append = () =>
     appendMemory({
       type: "learning",
@@ -128,7 +130,7 @@ test("a queued append refuses a busy store, preserves the holder, and succeeds o
   try {
     await expect(append()).rejects.toThrow(/memory store is busy:.*retry/);
     expect(readFileSync(file, "utf8")).toBe(before);
-    expect(readFileSync(lockFileFor(file), "utf8")).toBe(owner);
+    expect(lockIdentity(file)).toBe(owner);
   } finally {
     h.release();
     await h.held;
@@ -177,13 +179,13 @@ test.each([
         : seeded.file;
     const before = readFileSync(file, "utf8");
     const h = await holdRewrite(file);
-    const owner = readFileSync(lockFileFor(file), "utf8");
+    const owner = lockIdentity(file);
     try {
       const result = await child(operation, seeded.ts);
       expect(result.ok).toBe(false);
       expect(result.error).toMatch(/memory store is busy:.*retry/);
       expect(readFileSync(file, "utf8")).toBe(before);
-      expect(readFileSync(lockFileFor(file), "utf8")).toBe(owner);
+      expect(lockIdentity(file)).toBe(owner);
     } finally {
       h.release();
       await h.held;

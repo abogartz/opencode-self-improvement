@@ -5,7 +5,7 @@
 // material into ordinary memory — the update-tool twin of the viewer-edit
 // preservation fixed in #129.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
@@ -13,6 +13,7 @@ import { loadAll } from "../src/store/files/load.ts";
 import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
 import { seedPlanRow } from "./helpers/scenario-builders.ts";
 import { resetState } from "../src/core/state.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let a: string;
@@ -43,7 +44,7 @@ afterEach(async () => {
   ) {
     throw new Error("Unexpected fixture cleanup path");
   }
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 async function plugin(dir: string | null) {

@@ -1,7 +1,7 @@
 // #44 in the real wiring: memory_status must carry the store's own numbers, and
 // they must agree with what is actually on disk.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,7 @@ import { appendMemory } from "../src/store/files/append.ts";
 import { recordCaptureLag } from "../src/evidence/record.ts";
 import { loadPlugin } from "./harness.ts";
 import { resetState } from "../src/core/state.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 
@@ -22,7 +23,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 describe("self-metrics through the tool (#44)", () => {

@@ -7,13 +7,7 @@
 // retirement on the wrong chain. These pins drive the interleaving
 // deterministically through a module wrapper, so no test races a wall clock.
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import {
-  appendFileSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { memoryRoot } from "../src/core/config/paths.ts";
@@ -23,6 +17,7 @@ import type { SupersedeFields } from "../src/store/files/supersede.ts";
 import { resetState, setCurrent } from "../src/core/state.ts";
 import { rememberSessionDir } from "../src/identity/repokey.ts";
 import { readEvidenceLog as evidence, ev, field } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 // Captured BEFORE the mock below: the wrapper delegates to the genuine
 // implementation, and the simulated other session retires rows through the
@@ -77,7 +72,7 @@ beforeEach(() => {
 afterEach(() => {
   intercept.clear();
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 function seed(

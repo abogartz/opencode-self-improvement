@@ -3,7 +3,7 @@
 import type { ToolRegister } from "./deps.ts";
 import { memoryRoot } from "../core/config/paths.ts";
 import { record } from "../evidence/record.ts";
-import { withStoreLock } from "../store/lock.ts";
+import { withStoreBatch } from "../store/lock.ts";
 import { loadAll } from "../store/files/load.ts";
 import { clearSuperseded, markSuperseded } from "../store/files/supersede.ts";
 import { isVisibleTo, readerFromSid } from "../store/model/visibility.ts";
@@ -56,8 +56,9 @@ export const register: ToolRegister = (editor, deps) => {
         // records that publish before the overall promise settles (#197).
         const mergeDurable: string[] = [];
         try {
-          return await withStoreLock(
-            join(memoryRoot(), "update-order"),
+          return await withStoreBatch(
+            memoryRoot(),
+            "update-order",
             async () => {
               const all = await loadAll();
               const survivorRow = all.find((m) => m.ts === args.survivor);

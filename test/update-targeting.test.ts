@@ -9,7 +9,7 @@
 // Second contract: memory_merge_review declares a survivor canonical, so the
 // survivor must come out recallable — clearing a supersession it already carried.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -32,6 +32,7 @@ import { isActive } from "../src/store/model/predicates.ts";
 import { resetState, setCurrent } from "../src/core/state.ts";
 import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
 import { loadPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let liveRoot: string;
@@ -59,7 +60,7 @@ afterEach(() => {
   resetSessionScopes();
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 // Deliberately token-disparate so GATE-3 overlap/collapse never fires and each

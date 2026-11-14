@@ -8,7 +8,7 @@
 // "[via import]" discount. Legacy audit lines without the metadata restore
 // exactly as before — that is the documented fallback.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendMemory } from "../src/store/files/append.ts";
@@ -24,6 +24,7 @@ import {
 import { resetState } from "../src/core/state.ts";
 import { deletionsFile } from "../src/core/config/paths.ts";
 import { startViewer, type ViewerServer } from "../src/viewer/server.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let a: string;
@@ -51,7 +52,7 @@ afterEach(async () => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 async function startAdminViewer(): Promise<ViewerServer> {

@@ -9,7 +9,7 @@
 // recalls). The rule this file pins: an identity that cannot read a repository
 // cannot write one either. Refuse, loudly, and store nothing.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
@@ -26,6 +26,7 @@ import { resetCaptureCooldowns } from "../src/index.ts";
 import { evidenceDir, exportsDir } from "../src/core/config/paths.ts";
 import { dateStr } from "../src/core/time.ts";
 import { parseLine, type Fields } from "../src/core/logfmt/format.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 // status:"open" is the planning-thread home: a settled claim would be blocked
 // by GATE-4 for having no code refs, and the test would prove nothing about the
@@ -67,7 +68,7 @@ afterEach(async () => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 async function load(

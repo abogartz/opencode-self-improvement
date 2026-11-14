@@ -1,7 +1,7 @@
 // #177: exercise injection accounting through the registered host hooks and
 // public ledger/status surfaces, with the epoch policy inline or extracted.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import {
@@ -17,6 +17,7 @@ import { resetSessionScopes, setRepoScope } from "../src/identity/repokey.ts";
 import { noteAuthored, resetState } from "../src/core/state.ts";
 import { readStatus } from "../src/status/write.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const envKeys = [
   "OPENCODE_MEMORY_DIR",
@@ -63,7 +64,7 @@ afterEach(async () => {
   ) {
     throw new Error("Unexpected fixture cleanup target");
   }
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 const seed = (content: string) =>

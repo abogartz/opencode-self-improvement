@@ -5,7 +5,7 @@
 // withdrew the rejection that still guarded a blocked identical copy B, letting
 // the value be re-ingested. Probe reported at bf9f4d2; reproduced on main.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileIdentity } from "../src/core/logfmt/publish.ts";
@@ -28,6 +28,7 @@ import {
   unrejectMemory,
 } from "../src/viewer/mutate.ts";
 import { startViewer, type ViewerServer } from "../src/viewer/server.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const CONTENT =
   "the deploy pipeline pins the base image digest and verifies the signature before pushing";
@@ -48,7 +49,7 @@ afterEach(() => {
   resetSessionScopes();
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 async function post(

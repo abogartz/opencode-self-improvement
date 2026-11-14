@@ -21,7 +21,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -53,6 +52,7 @@ import {
   scoreArm,
 } from "../bench/runners/recall-quality.ts";
 import { loadPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const REPO = join(import.meta.dir, "..");
 const REPO_A = { key: "aaa111", path: "/work/alpha" };
@@ -75,7 +75,7 @@ beforeEach(() => {
 afterEach(() => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 // --- seeding -------------------------------------------------------------------

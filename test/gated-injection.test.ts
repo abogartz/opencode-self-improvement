@@ -7,7 +7,7 @@
 // Robustness: every host hook fails closed so a corrupt/missing store can never
 // break a tool call or the system transform.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { evidenceDir } from "../src/core/config/paths.ts";
@@ -26,6 +26,7 @@ import { resetState, setCurrent } from "../src/core/state.ts";
 import { rememberSessionDir, setRepoScope } from "../src/identity/repokey.ts";
 import { loadPlugin } from "./harness.ts";
 import { readEvidenceLog as evidence, ev, field } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let liveRoot: string;
@@ -43,7 +44,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 function ctx(sid: string): GateContext {

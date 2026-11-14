@@ -8,7 +8,7 @@
 // Audit reasons (deletions.logfmt) carry the same rule. Fixing NEW writes says
 // nothing about old files — remediation stays separate (#74).
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
@@ -32,6 +32,7 @@ import {
   removeBlock,
 } from "../src/store/blocklist.ts";
 import { blockMemory, unblockMemory } from "../src/viewer/mutate.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const TOKEN = "ghp_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 const PEM = [
@@ -67,7 +68,7 @@ afterEach(async () => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 const evidenceText = (): string => {

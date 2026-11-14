@@ -11,7 +11,7 @@
 // these tests pin, in both directions: one lock on the normal path, and the old
 // behaviour preserved for a store that breaks the mapping.
 import { afterEach, beforeEach, expect, setSystemTime, test } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { memoryRoot } from "../src/core/config/paths.ts";
@@ -31,6 +31,7 @@ import {
   withStoreLock,
 } from "../src/store/lock.ts";
 import { releaseQuarantine } from "../src/store/quarantine/release.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 
@@ -51,7 +52,7 @@ afterEach(() => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 /**

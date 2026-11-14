@@ -12,7 +12,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { connect } from "node:net";
@@ -24,6 +23,7 @@ import { loadAll, memoryFiles } from "../src/store/files/load.ts";
 import { startViewer, type ViewerServer } from "../src/viewer/server.ts";
 import { blockedTs } from "../src/store/blocklist.ts";
 import { systemDigest } from "../src/inject/digest.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let vm: ViewerServer;
@@ -39,7 +39,7 @@ beforeEach(async () => {
 afterEach(async () => {
   vm.server.stop();
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 function seed(

@@ -10,7 +10,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,6 +23,7 @@ import { markSuperseded } from "../src/store/files/supersede.ts";
 import { parseLine } from "../src/core/logfmt/format.ts";
 import { readLines } from "../src/core/logfmt/read.ts";
 import { restoreSnapshot } from "../src/store/undo.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const DAY = new Date().toISOString().slice(0, 10);
 const store = () => join(memoryRoot(), `${DAY}.logfmt`);
@@ -44,7 +44,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 }, 30_000);
 
 async function rawLines(): Promise<string[]> {

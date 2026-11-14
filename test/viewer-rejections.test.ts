@@ -7,7 +7,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +22,7 @@ import { rejectedFile } from "../src/store/tombstones/rejection.ts";
 import { tombstone } from "../src/store/tombstones/tombstone.ts";
 import { editMemory } from "../src/viewer/mutate.ts";
 import { startViewer, type ViewerServer } from "../src/viewer/server.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const REJECTED =
   "decided to adopt the express framework for the http layer and terminate tls at the load balancer";
@@ -57,7 +57,7 @@ afterEach(() => {
   else process.env.OPENCODE_MEMORY_DIR = oldMemoryDir;
   if (oldCommandsDir === undefined) delete process.env.OPENCODE_COMMANDS_DIR;
   else process.env.OPENCODE_COMMANDS_DIR = oldCommandsDir;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 async function post(path: string, body: unknown): Promise<Response> {

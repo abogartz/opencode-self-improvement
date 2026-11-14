@@ -15,7 +15,7 @@
 // report renders the estimate with its caveat and renders a zero with a reason;
 // and the session's completion tokens appear only when the host reports them.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatLine } from "../src/core/logfmt/format.ts";
@@ -27,6 +27,7 @@ import { memoryRoot } from "../src/core/config/paths.ts";
 import { setRepoScope } from "../src/identity/repokey.ts";
 import { loadPlugin } from "./harness.ts";
 import { readEvidenceLog as evidence, sleep } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let liveRoot: string;
@@ -44,7 +45,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 const line = (

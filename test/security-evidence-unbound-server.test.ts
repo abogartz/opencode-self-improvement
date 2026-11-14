@@ -11,7 +11,7 @@
 // genuinely sid-less lines (legacy, out-of-plugin maintenance) keep their
 // historical global reading — that policy is untouched.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
@@ -25,6 +25,7 @@ import { resetState } from "../src/core/state.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
 import { evidenceDir } from "../src/core/config/paths.ts";
 import { dateStr } from "../src/core/time.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let b: string;
@@ -57,7 +58,7 @@ afterEach(async () => {
   ) {
     throw new Error("Unexpected fixture cleanup path");
   }
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 // Probe 1: server-style plugin (NO setup directory), nothing to provisionally

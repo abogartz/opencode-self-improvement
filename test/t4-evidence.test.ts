@@ -8,6 +8,7 @@ import { parseLine } from "../src/core/logfmt/format.ts";
 import { readLines } from "../src/core/logfmt/read.ts";
 import { resetState, session, setCurrent } from "../src/core/state.ts";
 import { afterTool, callsFor, writeEvidence } from "../src/capture/triggers.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let old: string | undefined;
@@ -23,7 +24,7 @@ afterEach(() => {
   else process.env.OPENCODE_MEMORY_DIR = old;
   if (dirname(resolve(root)) !== resolve(tmpdir()))
     throw new Error("Unexpected fixture root");
-  rmSync(root, { recursive: true, force: true });
+  removeStore(root);
 });
 async function call(id: string, tool = "read", command = "", exitCode = 0) {
   setCurrent({ sessionID: "t4", callID: id, tool });

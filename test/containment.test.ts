@@ -38,6 +38,7 @@ import { importMemories } from "../src/portable/import.ts";
 import { resetState } from "../src/core/state.ts";
 import { setRepoScope } from "../src/identity/repokey.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 // The harness types tools as a loose record; this fails loudly at the call site
 // instead of papering over the optionality with a non-null assertion.
@@ -65,7 +66,7 @@ afterEach(() => {
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
   delete process.env.OPENCODE_MEMORY_ALLOW_OUTSIDE_PATHS;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 // Symlinks need Developer Mode/admin on Windows; a directory junction needs no
@@ -77,7 +78,7 @@ function makeLink(target: string, linkPath: string): void {
   } catch (err) {
     if (!(err instanceof Error && "code" in err && err.code === "EPERM"))
       throw err;
-    rmSync(linkPath, { recursive: true, force: true });
+    removeStore(linkPath);
     symlinkSync(target, linkPath, "junction");
   }
 }
@@ -100,7 +101,7 @@ const CAN_SYMLINK = (() => {
       return false;
     throw err;
   } finally {
-    rmSync(probe, { recursive: true, force: true });
+    removeStore(probe);
   }
 })();
 
@@ -357,7 +358,7 @@ describe("resolveContained", () => {
   test("an exports/ that is itself a symlink cannot move the write out of the store", async () => {
     // Every check against exports/'s own realpath would pass; the outerRoot
     // check is what catches this, mirroring undo.ts's snapshots-vs-root test.
-    rmSync(exportsDir(), { recursive: true, force: true });
+    removeStore(exportsDir());
     const outside = join(root, "elsewhere");
     mkdirSync(outside, { recursive: true });
     makeLink(outside, exportsDir());

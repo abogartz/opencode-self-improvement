@@ -1,18 +1,19 @@
 // A reader must use metadata and bytes from the same opened file. An atomic
 // replacement may change the path between the metadata lookup and the read.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readLines } from "../src/core/logfmt/read.ts";
 import { replaceWithCachedHandle } from "./helpers/cached-handle.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "osi-read-replace-"));
 });
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 test("a larger atomic replacement is not cropped to the previous file size", async () => {

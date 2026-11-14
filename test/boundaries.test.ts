@@ -8,7 +8,7 @@
 // (3) STORE READER: row identity is `ts`; a non-ISO ts is skipped as
 //     malformed — counted in memory_status, never an addressable row.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setRepoScope } from "../src/identity/repokey.ts";
@@ -19,6 +19,7 @@ import { loadAll, malformedCount } from "../src/store/files/load.ts";
 import { loadPlugin } from "./harness.ts";
 import { startViewer, type ViewerServer } from "../src/viewer/server.ts";
 import { dayFile } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 // Captured from main (v0.4.1) via loadPlugin() before the zod migration, then
 // re-captured for each deliberate move of the model-facing contract — recorded
@@ -307,7 +308,7 @@ beforeEach(() => {
 afterEach(() => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 describe("wire contract — zod generates the exact pre-zod JSON Schema", () => {

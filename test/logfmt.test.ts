@@ -25,6 +25,7 @@ import { readLines } from "../src/core/logfmt/read.ts";
 import { appendMemory } from "../src/store/files/append.ts";
 import { loadAll } from "../src/store/files/load.ts";
 import { markSuperseded } from "../src/store/files/supersede.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let tmpDir: string;
 
@@ -107,12 +108,7 @@ describe("legacy rows in the store", () => {
   afterEach(() => {
     if (prev === undefined) delete process.env.OPENCODE_MEMORY_DIR;
     else process.env.OPENCODE_MEMORY_DIR = prev;
-    rmSync(tmpDir, {
-      recursive: true,
-      force: true,
-      maxRetries: 5,
-      retryDelay: 20,
-    });
+    removeStore(tmpDir);
   });
 
   test("superseding a legacy row rewrites it in the current format without changing it", async () => {
@@ -151,12 +147,7 @@ describe("store rows cannot be forged through content", () => {
   afterEach(() => {
     if (prev === undefined) delete process.env.OPENCODE_MEMORY_DIR;
     else process.env.OPENCODE_MEMORY_DIR = prev;
-    rmSync(tmpDir, {
-      recursive: true,
-      force: true,
-      maxRetries: 5,
-      retryDelay: 20,
-    });
+    removeStore(tmpDir);
   });
 
   test("a newline plus fields in content stays one memory", async () => {
@@ -230,7 +221,7 @@ describe.skipIf(process.platform !== "win32")(
         expect(await readLines(file)).toEqual(["seed", "anchored"]);
       } finally {
         h.release();
-        rmSync(root, { recursive: true, force: true });
+        removeStore(root);
       }
     });
 
@@ -254,7 +245,7 @@ describe.skipIf(process.platform !== "win32")(
         expect(await readLines(file)).toEqual(["seed", "APPENDED"]); // append intact
       } finally {
         h.release();
-        rmSync(root, { recursive: true, force: true });
+        removeStore(root);
       }
     });
 
@@ -294,7 +285,7 @@ describe.skipIf(process.platform !== "win32")(
         expect(await readLines(file)).toEqual(["seed", "APPENDED"]); // the touched destination survives
       } finally {
         h.release();
-        rmSync(root, { recursive: true, force: true });
+        removeStore(root);
       }
     });
   },

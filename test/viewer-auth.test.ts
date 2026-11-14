@@ -4,9 +4,10 @@
 // token-free flow. Real child process, real HTTP, same pattern as
 // viewer-startup.test.ts.
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const EVAL = `
 import { startViewer } from "./src/viewer/server.ts";
@@ -148,12 +149,7 @@ describe("viewer token auth (#223)", () => {
       const result = runViewer({ OSI_AUTH_TEST: "loopback" }, root);
       expect(result.exitCode, result.stderr.toString()).toBe(0);
     } finally {
-      rmSync(root, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(root);
     }
   });
 
@@ -170,12 +166,7 @@ describe("viewer token auth (#223)", () => {
       );
       expect(result.exitCode, result.stderr.toString()).toBe(0);
     } finally {
-      rmSync(root, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(root);
     }
   });
 
@@ -192,12 +183,7 @@ describe("viewer token auth (#223)", () => {
       );
       expect(result.exitCode, result.stderr.toString()).toBe(0);
     } finally {
-      rmSync(root, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(root);
     }
   });
 
@@ -214,12 +200,7 @@ describe("viewer token auth (#223)", () => {
       );
       expect(result.exitCode, result.stderr.toString()).toBe(0);
     } finally {
-      rmSync(root, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(root);
     }
   });
 
@@ -237,12 +218,7 @@ describe("viewer token auth (#223)", () => {
       );
       expect(result.exitCode, result.stderr.toString()).toBe(0);
     } finally {
-      rmSync(root, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(root);
     }
   });
 });

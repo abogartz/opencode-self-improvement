@@ -17,6 +17,7 @@ import { dateStr } from "../src/core/time.ts";
 import { appendMemory } from "../src/store/files/append.ts";
 import { formatLine, parseLine } from "../src/core/logfmt/format.ts";
 import { readLines } from "../src/core/logfmt/read.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string;
 let file: string;
@@ -45,7 +46,7 @@ beforeEach(() => {
 afterEach(() => {
   if (previousDir === undefined) delete process.env.OPENCODE_MEMORY_DIR;
   else process.env.OPENCODE_MEMORY_DIR = previousDir;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 test("a static unterminated row survives a subsequent daily append", async () => {

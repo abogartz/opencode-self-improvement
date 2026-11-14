@@ -8,13 +8,7 @@
 // process cwd nor an unstamped "global" row (#152) — until a session event
 // binds the identity.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -30,6 +24,7 @@ import { isVisibleHere } from "../src/store/model/visibility.ts";
 import { resetState, setCurrent } from "../src/core/state.ts";
 import { loadPlugin } from "./harness.ts";
 import { dayFile, sleep } from "./helpers/logfmt.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const MODULE_SCOPE = { key: "mod111", path: "/work/module" };
 
@@ -51,7 +46,7 @@ afterEach(() => {
   resetSessionScopes();
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {

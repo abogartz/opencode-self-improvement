@@ -18,7 +18,6 @@ import {
   readdirSync,
   readFileSync,
   writeFileSync,
-  rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,6 +32,7 @@ import { selectRelevant } from "../src/recall/relevant.ts";
 import { formatInit } from "../src/init/format.ts";
 import { type InitSummary, runInit } from "../src/init/run.ts";
 import { stampDir } from "../src/init/stamp.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let memoryDir: string;
 let fixture: string;
@@ -63,7 +63,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 describe("memory_init", () => {

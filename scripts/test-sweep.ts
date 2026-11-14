@@ -104,21 +104,97 @@ const QUOTE_CLASS_PLAIN = '["=]';
 export const MUTANTS: Mutant[] = [
   // ---- store lock (src/store/lock.ts) -------------------------------------------
   {
-    id: "lock-noexcl-mutex",
+    // #407 re-anchoring: the mutex is no longer an O_EXCL file, it is a SQLite
+    // transaction. The invariant is the same — the section must not run without
+    // the lock — and it is now killed by a real second process rather than by a
+    // flag on open().
+    id: "lock-no-transaction",
     file: "src/store/lock.ts",
-    find: `const handle = await open(lockPath, "wx", 0o600);`,
-    replace: `const handle = await open(lockPath, "w", 0o600);`,
-    invariant: "lock file is created with O_EXCL: the mutex is cross-process",
+    find: `      db.run("BEGIN IMMEDIATE");`,
+    replace: `      // mutant: the section runs with no transaction and no lock`,
+    invariant:
+      "the store lock is claimed before the section runs: the mutex is cross-process",
     class: "D2",
     scenario: true, // consistency: two sessions rewriting one day file
   },
   {
-    id: "lock-no-stale-steal",
+    id: "lock-no-release",
     file: "src/store/lock.ts",
-    find: `if (age < STALE_MS) return false;`,
-    replace: `if (age >= 0) return false;`,
-    invariant: "a lock abandoned by a dead process is taken over after age",
+    find: `      db.run("ROLLBACK");`,
+    replace: `      // mutant: the transaction is never given back`,
+    invariant:
+      "a section gives the lock back when it finishes, including when it throws",
+    class: "D2",
+  },
+  {
+    // The property #407 exists for. The lock file protocol asked Windows to
+    // unlink a name per release; this one asks for nothing, so a mutant that
+    // deletes an artifact per acquisition is the regression to catch.
+    id: "lock-deletes-artifact",
+    file: "src/store/lock.ts",
+    find: `  await harden(dbPath);\n  acquiredHook?.(file);`,
+    // require(), not an added import: a mutant is a single edit, and a bare
+    // unlinkSync here throws ReferenceError into its own catch and survives by
+    // doing nothing — which is what the first version of this mutant did.
+    replace: `  try {\n    require("node:fs").unlinkSync(dbPath + "-shm");\n  } catch {}\n  await harden(dbPath);\n  acquiredHook?.(file);`,
+    invariant:
+      "an acquisition creates and deletes nothing in the store: Windows is never asked to unlink a lock",
+    class: "D2",
+  },
+  {
+    // A cached connection is an open file, and Windows will not delete a
+    // directory that contains one, so teardown must drop idle handles; but one
+    // inside a section still guards a live transaction and must survive.
+    id: "lock-close-drops-held",
+    file: "src/store/lock.ts",
+    find: `    if (pinned.inUse > 0) continue;`,
+    replace: `    if (false) continue;`,
+    invariant:
+      "teardown drops idle lock handles and leaves a handle inside a section alone",
+    class: "D1",
+  },
+  {
+    // Bun reports the post-crash wait as the EXTENDED code
+    // SQLITE_BUSY_RECOVERY (errno 261), not SQLITE_BUSY. Matching only the
+    // plain code made the first writer after a crashed holder fatal — the
+    // exact defect this module is supposed to absorb.
+    id: "lock-busy-strict",
+    file: "src/store/lock.ts",
+    find: `    return e.code === "SQLITE_BUSY" || e.code.startsWith("SQLITE_BUSY_");`,
+    replace: `    return e.code === "SQLITE_BUSY";`,
+    invariant:
+      "the whole busy FAMILY is contention, including the extended codes Bun reports after a crash",
+    class: "D1",
+  },
+  {
+    // Held state is per async call chain (AsyncLocalStorage). A process-wide
+    // set — the shape the first cut of the SQLite backend shipped — let a
+    // SIBLING task read "already held" and write with no lock at all.
+    id: "lock-held-process-wide",
+    file: "src/store/lock.ts",
+    find: `  if (heldLocks.getStore()?.has(dbPath)) {`,
+    replace: `  if (true) {`,
+    invariant:
+      "held state is scoped to the call chain: a sibling task never inherits a lock",
+    class: "D1",
+  },
+  {
+    id: "lock-wal-unenforced",
+    file: "src/store/lock.ts",
+    find: `      if (journalMode(db) === "wal") return;\n      db.run("PRAGMA journal_mode = WAL");`,
+    replace: `      if (true) return;\n      db.run("PRAGMA journal_mode = WAL");`,
+    invariant:
+      "a store that cannot reach WAL mode is refused, not run in rollback-journal mode",
     class: "guard",
+  },
+  {
+    id: "lock-all-errors-contention",
+    file: "src/store/lock.ts",
+    find: `function contention(err: unknown): boolean {`,
+    replace: `function contention(err: unknown): boolean {\n  return true;`,
+    invariant:
+      "a broken lock database surfaces its own cause instead of waiting out the budget",
+    class: "D1",
   },
   {
     id: "lock-restore-failopen",
@@ -179,7 +255,13 @@ export const MUTANTS: Mutant[] = [
   {
     id: "append-nolock",
     file: "src/store/files/append.ts",
-    find: L("return withStoreLock(", "    file,", "    async () => {"),
+    // Re-anchored: the append site stopped being a bare `return` when its body
+    // grew a declared result type.
+    find: L(
+      "const outcome = await withStoreLock(",
+      "      file,",
+      "      async (): Promise<{",
+    ),
     replace: `return ((...a: unknown[]) => (a[1] as () => Promise<unknown>)())(file, async () => {`,
     invariant: "appends hold the store lock: none lands inside an RMW window",
     class: "D2",
@@ -290,77 +372,35 @@ export const MUTANTS: Mutant[] = [
   {
     id: "undo-force-safety-after-publish",
     file: "src/store/undo.ts",
-    find: L(
-      "const safety =",
-      '        mode === "force" ? (await snapshotFiles([target]))[0] : undefined;',
-      "",
-      "      let out = snapLines;",
-      '      if (mode === "merge") {',
-      "        // Keep the CURRENT version of rows the snapshot also has (in-place edits —",
-      "        // e.g. a supersede stamp — made after the snapshot win), then append the",
-      "        // rows the snapshot never saw. Merge is a deliberate superset: rows the",
-      "        // snapshotter wrote after the snapshot are NOT dropped here; choose FORCE",
-      "        // for that.",
-      "        out = snapLines",
-      "          .map((l) => curByKey.get(rowKey(l)) ?? l)",
-      "          .concat(curOwn.filter((l) => !snapByKey.has(rowKey(l))));",
-      "      }",
-      "      // FORCE's \"exact rollback\" is exact FOR THE CALLER'S REPOSITORY, not",
-      "      // beyond it: foreign live lines rejoin the file verbatim in every mode,",
-      "      // appended at the end — line content preserved, position not (#153).",
-      "      // Under the admin reader curForeign is empty and the write is the",
-      "      // historical whole-file restore, byte for byte.",
-      "      out = out.concat(curForeign);",
-      "      await ensureDir(memoryRootDir);",
-      '      await writeAtomic(target, out.length ? out.join("\\n") + "\\n" : "", since);',
-      "      return {",
-      "        target,",
-      "        restored: true,",
-      "        mode,",
-      "        safety,",
-      "        concurrentAdded,",
-      "        concurrentChanged,",
-      "        deletedOmitted,",
-      "        foreignPreserved: curForeign.length,",
-      "      };",
-    ),
-    replace: L(
-      "      let safety: string | undefined;",
-      "",
-      "      let out = snapLines;",
-      '      if (mode === "merge") {',
-      "        // Keep the CURRENT version of rows the snapshot also has (in-place edits —",
-      "        // e.g. a supersede stamp — made after the snapshot win), then append the",
-      "        // rows the snapshot never saw. Merge is a deliberate superset: rows the",
-      "        // snapshotter wrote after the snapshot are NOT dropped here; choose FORCE",
-      "        // for that.",
-      "        out = snapLines.map((l) => curByKey.get(rowKey(l)) ?? l).concat(",
-      "          curOwn.filter((l) => !snapByKey.has(rowKey(l))),",
-      "        );",
-      "      }",
-      "      // FORCE's \"exact rollback\" is exact FOR THE CALLER'S REPOSITORY, not",
-      "      // beyond it: foreign live lines rejoin the file verbatim in every mode,",
-      "      // appended at the end — line content preserved, position not (#153).",
-      "      // Under the admin reader curForeign is empty and the write is the",
-      "      // historical whole-file restore, byte for byte.",
-      "      out = out.concat(curForeign);",
-      "      await ensureDir(memoryRootDir);",
-      '      await writeAtomic(target, out.length ? out.join("\\n") + "\\n" : "", since);',
-      '      safety = mode === "force" ? (await snapshotFiles([target]))[0] : undefined;',
-      "      return {",
-      "        target,",
-      "        restored: true,",
-      "        mode,",
-      "        safety,",
-      "        concurrentAdded,",
-      "        concurrentChanged,",
-      "        deletedOmitted,",
-      "        foreignPreserved: curForeign.length,",
-      "      };",
-    ),
-    invariant: "the safety copy is taken BEFORE the publish that drops rows",
-    class: "D4",
-    scenario: true, // conservation-order flip: result.safety exists, is a lie
+    // Re-anchored for the current section shape (the merge result is built
+    // into `pubOwn`, and foreign lines are re-admitted at the publish). The
+    // hazard is unchanged: FORCE snapshots the file it is about to replace,
+    // INSIDE the lock and BEFORE the publish, so rows another session appended
+    // moments earlier are part of the copy. Snapshotting after the publish
+    // captures the new state and the rollback restores what the restore itself
+    // wrote.
+    find: `      const safety =
+        mode === "force" ? (await snapshotFiles([target]))[0] : undefined;
+
+      // Foreign live lines are re-admitted verbatim in every mode, appended at
+      // the end — line content preserved, position not (#153). Under the admin
+      // reader curForeign is empty and the write is the historical whole-file
+      // restore, byte for byte — modulo the rejected-row omission above, which
+      // applies to every reader and every mode: a rejection is absolute, not
+      // per-repository.
+      const out = pubOwn.concat(curForeign);
+      await ensureDir(memoryRootDir);
+      await writeAtomic(target, out.length ? out.join("\\n") + "\\n" : "", since);
+`,
+    replace: `      let safety: string | undefined;
+      const out = pubOwn.concat(curForeign);
+      await ensureDir(memoryRootDir);
+      await writeAtomic(target, out.length ? out.join("\\n") + "\\n" : "", since);
+      safety =
+        mode === "force" ? (await snapshotFiles([target]))[0] : undefined;`,
+    invariant:
+      "FORCE snapshots the target inside the lock and before the publish, so a concurrent append is recoverable",
+    class: "D1",
   },
   {
     id: "undo-check-mutates",
@@ -473,14 +513,6 @@ export const MUTANTS: Mutant[] = [
     scenario: true,
   },
   {
-    id: "lock-release-blind",
-    file: "src/store/lock.ts",
-    find: `      if ((await Bun.file(lockPath).text()) === token) await unlink(lockPath);`,
-    replace: `      await unlink(lockPath);`,
-    invariant: "a holder never deletes a lock another process took over",
-    class: "D2",
-  },
-  {
     // The main lock had this policy branch duplicated (direct budget path +
     // queue-abandon path); the original single mutant went ambiguous when
     // both landed. Split into uniquely-anchored mutants.
@@ -516,8 +548,8 @@ export const MUTANTS: Mutant[] = [
     // lock" in test/lock.test.ts (a fresh foreign lock file, no opts).
     id: "lock-default-fail-direct",
     file: "src/store/lock.ts",
-    find: `        if (timeoutPolicy(opts) === "fail") {`,
-    replace: `        if (opts.onTimeout === "fail") {`,
+    find: `        opts.onEvent?.("timeout", now() - started);\n        if (timeoutPolicy(opts) === "fail") {`,
+    replace: `        opts.onEvent?.("timeout", now() - started);\n        if (opts.onTimeout === "fail") {`,
     invariant:
       "the direct budget-deadline give-up resolves the fail-closed default, not an explicit-fail-only check",
     class: "D1",
@@ -525,12 +557,13 @@ export const MUTANTS: Mutant[] = [
   {
     id: "restore-merge-drops",
     file: "src/store/undo.ts",
+    // Re-anchored: the merge result is built into `pubOwn` now, not `out`.
     find: L(
-      "out = snapLines",
+      "pubOwn = snapLines",
       "          .map((l) => curByKey.get(rowKey(l)) ?? l)",
       "          .concat(curOwn.filter((l) => !snapByKey.has(rowKey(l))));",
     ),
-    replace: `        out = snapLines;`,
+    replace: `        pubOwn = snapLines;`,
     invariant:
       "merge restores the snapshot AND keeps concurrently written rows",
     class: "D4",

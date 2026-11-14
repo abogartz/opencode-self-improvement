@@ -10,7 +10,7 @@ import { auditCaveat, runWriteGate, sameStrList } from "../gate/gate.ts";
 import { loadAll } from "../store/files/load.ts";
 import { markSuperseded } from "../store/files/supersede.ts";
 import { resolveMemoryTarget } from "../store/files/target.ts";
-import { withStoreLock } from "../store/lock.ts";
+import { withStoreBatch } from "../store/lock.ts";
 import type { Memory } from "../store/model/memory.ts";
 import { isActive } from "../store/model/predicates.ts";
 import { isVisibleTo, readerFromSid } from "../store/model/visibility.ts";
@@ -45,13 +45,14 @@ export const register: ToolRegister = (editor, deps) => {
         // resolved the same still-active target both promoted and both
         // claimed success: markSuperseded is first-call-wins, so one
         // replacement row silently survived un-superseded (measured 5/5).
-        // This outer lock is a DISTINCT file from anything runWriteGate or
-        // markSuperseded take (sections run flat — never re-enter a file
-        // you hold), and the acquisition order is always update-order
-        // then store, never the reverse, so it cannot deadlock against a
-        // plain writer. On timeout it FAILS closed: proceeding unlocked
-        // is exactly the race this lock exists to close. The loser then
-        // re-resolves under the lock, finds its target already retired,
+        // This outer lock is DISTINCT from anything runWriteGate or
+        // markSuperseded take — withStoreBatch gives it its own database, so
+        // the gate never holds the store-wide lock (sections run flat — never
+        // re-enter a lock you hold). The acquisition order is always
+        // update-order then store, never the reverse, so it cannot deadlock
+        // against a plain writer. On timeout it FAILS closed: proceeding
+        // unlocked is exactly the race this lock exists to close. The loser
+        // then re-resolves under the lock, finds its target already retired,
         // and writes nothing — the documented fail-closed contract.
         // Flips once a replacement row is durable, so the catch below can
         // never claim "Nothing was written" about a write that happened
@@ -62,8 +63,9 @@ export const register: ToolRegister = (editor, deps) => {
         // is no longer writable.
         const gateDurable: string[] = [];
         try {
-          return await withStoreLock(
-            join(memoryRoot(), "update-order"),
+          return await withStoreBatch(
+            memoryRoot(),
+            "update-order",
             async () => {
               const prior = (await loadAll()).filter(
                 (m) =>

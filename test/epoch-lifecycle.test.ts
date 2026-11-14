@@ -1,7 +1,7 @@
 // Hook-level lifecycle contracts for the #168 extraction. These also pass
 // with the policy inline: this is a refactor, not a new cache policy.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { appendMemory } from "../src/store/files/append.ts";
@@ -10,6 +10,7 @@ import { SESSION_CAP } from "../src/core/lru.ts";
 import { resetState } from "../src/core/state.ts";
 import { readStatus } from "../src/status/write.ts";
 import { loadPlugin, type LoadedPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 let root: string, repo: string, plugins: LoadedPlugin[];
 beforeEach(async () => {
@@ -48,7 +49,7 @@ afterEach(async () => {
   ) {
     throw new Error("Unexpected fixture cleanup target");
   }
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 async function plugin() {
   const p = await loadPlugin(repo);

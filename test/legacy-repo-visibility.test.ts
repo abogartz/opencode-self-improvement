@@ -32,6 +32,7 @@ import {
   type Reader,
 } from "../src/store/model/visibility.ts";
 import { loadPlugin } from "./harness.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const hash = (s: string) =>
   createHash("sha1").update(s).digest("hex").slice(0, 12);
@@ -45,7 +46,7 @@ try {
   writeFileSync(join(oracle, "case-probe"), "x");
   foldsCase = existsSync(join(oracle, "CASE-PROBE"));
 } finally {
-  rmSync(oracle, { recursive: true, force: true });
+  removeStore(oracle);
 }
 
 let root: string;
@@ -71,7 +72,7 @@ afterEach(() => {
   else process.env.OPENCODE_MEMORY_DIR = oldMemoryDir;
   if (oldCommandsDir === undefined) delete process.env.OPENCODE_COMMANDS_DIR;
   else process.env.OPENCODE_COMMANDS_DIR = oldCommandsDir;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 function siblings() {

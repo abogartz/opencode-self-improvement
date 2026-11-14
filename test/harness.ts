@@ -16,11 +16,12 @@
 //   - `cleanup`: whatever setup() returned (no-op when it returned nothing).
 
 import { afterEach, beforeEach } from "bun:test";
-import { lstatSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { lstatSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, sep } from "node:path";
 import plugin from "../index.ts";
 import { resetState } from "../src/core/state.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 /**
  * Register an isolated store for each test in the current describe scope.
@@ -99,12 +100,7 @@ export function withTempStore({
       }
       // Re-check the owned root, never a test-modified environment variable.
       assertRoot(state.root, state.tempParent);
-      rmSync(state.root, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 20,
-      });
+      removeStore(state.root);
     } finally {
       if (state.memory === undefined) delete process.env.OPENCODE_MEMORY_DIR;
       else process.env.OPENCODE_MEMORY_DIR = state.memory;

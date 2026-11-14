@@ -28,6 +28,7 @@ import { resetState } from "../src/core/state.ts";
 import { resetCaptureCooldowns } from "../src/index.ts";
 import { evidenceDir, memoryRoot } from "../src/core/config/paths.ts";
 import { dateStr } from "../src/core/time.ts";
+import { removeStore } from "./helpers/remove-store.ts";
 
 const TOKEN = "ghp_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 
@@ -61,7 +62,7 @@ afterEach(async () => {
   setRepoScope(null);
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  removeStore(root);
 });
 
 async function seedPrivate(dir: string, marker: string): Promise<void> {
@@ -238,7 +239,7 @@ test("a merge whose evidence write fails reports the retirement it actually made
   // during setup) loses to the poison, never the other way around.
   mkdirSync(memoryRoot(), { recursive: true });
   const poisoned = join(memoryRoot(), "evidence");
-  rmSync(poisoned, { recursive: true, force: true });
+  removeStore(poisoned);
   writeFileSync(poisoned, "not a directory");
   await appendMemory({
     type: "decision",
