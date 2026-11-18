@@ -1,9 +1,14 @@
 # Injection epochs and their measured cost
 
+Prompt caching turns a boring question into an expensive one: how often do the
+bytes in front of the model actually change? The plugin's answer is to freeze
+the memory section and re-render only when the frozen bytes would genuinely
+differ — the same reason you cache an HTTP response by its body rather than by
+how many times the database was touched.
+
+Every figure here is bytes on a synthetic workload: not tokens, not a bill.
 The epoch mechanism, the deterministic byte workload behind the injection
-claim, and a provider audit reported by its author. Every figure here keeps
-the label it carried in the README: bytes are bytes, not tokens and not a
-bill.
+claim, and a provider audit reported by its author.
 
 - **Section-frozen injection.** The whole memory section — standing digest, open-thread frontier, relevance block — is computed once per epoch and delivered byte-identically until something the model actually needs changes. The epoch's authority is the **rendered bytes**, not the store fingerprint: a promoted row that changes nothing visible costs no cache bust.
 - **A session never pays for bytes it is not riding.** A memory *you* saved in this session is a fact you already produced — it is in your own transcript — so it never busts your cache. The test is not "did the store change" but "would the frozen bytes still have been produced from the same inputs, minus the rows this session authored since": a correction, blocklisting, redaction or supersession of a row you are riding, and anything another session, the viewer or an import wrote, all still land on your next request.

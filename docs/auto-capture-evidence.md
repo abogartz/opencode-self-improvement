@@ -1,8 +1,15 @@
 # Auto-capture: what the evidence covers
 
+Three different claims get confused constantly, so this file names them
+separately: the event fires, the write survives, and a live store with a live
+model completes a pass. The first two are shown. The third has never been
+observed.
+
 What has been established about auto-capture, by what kind of evidence,
 and what remains unverified. The status and the arm/diagnose answer stay
 in the README; this is the record behind them.
+
+## What has been established
 
 What is established, from tests and fixtures (no live store involved):
 
@@ -16,7 +23,7 @@ What is established, from tests and fixtures (no live store involved):
 
 - **The availability policy is measured against its alternatives, and against its own measuring stick.** `bun run bench:availability` (`bench/availability-results.md`) runs one capture pass over a 197-row store five times — no check, tag (as shipped), drop-at-read (the P3 preview), drop-hardened, and the original rule replayed from the pinned `362655c` module — with the byte budget swept over five sizes and the background resampled at 0/30/90/180 rows, because a claim measured at one budget or one store size is a claim about that budget. Tagging keeps all 10 new transport facts and retrieves 14 of 14 retrievable queries at every budget and every store size, where the original rule keeps 6 of 10 and retrieves 7 at every budget: that rule deleted four of ten new facts on a command mention alone, and a deleted fact cannot be retrieved. The ceiling is stated next to every recall figure and measured on the exact rows the arms retrieve: 14 of the 21 curated transport queries retrieve their own gold when that gold is the ONLY row in the store, so the tag arm's 14 is the achievable maximum and 9/21 was never 43% recall. The counterfactual is printed beside it — strip the keywords the capture reply carries and the ceiling falls to 9/21, because five of these pairs are retrievable only through the keyword list. A 25-case bank of every adversarial verdict this matcher has been found guilty of is re-decided on every run, one repo per case, and asserted in `bun test` because CI runs no bench. Writing those controls found two defects in the bench itself — verdicts keyed on `ts`, which is not unique when a pass writes rows in one millisecond, and a byte column summed across 21 queries and labelled per-block — and the corrected numbers are in the file. The report also states what it cannot measure: the check marks 6 of 16 rows a pass writes and 0 of 180 background rows, and that 0 is a fixture artefact rather than a base rate, because no seeded row quotes the tracked tree. It also tests the tag's justification directly: empty the tracked text and all 6 verdicts disappear, which is the property a read-time policy would keep and a delete would not.
 
-What is not established:
+## What has not been established
 
 - That a live host with a live model completes a capture end to end. The event and the pass are no longer in doubt — `e2e/capture.test.ts` shows a real `opencode run` turn firing a real pass — but no `auto_capture_*` line and no `capture_lag` line exists anywhere in the maintainer's evidence history (checked 2026-10-26 through 2026-10-29), and #404 found the mechanism by which a CLI session would produce none even when everything else works — the fix is on this branch, but no live store has been observed completing a pass yet. A live trial armed on 2026-10-26 was stood down on 2026-10-29 without ever firing, so it answered nothing.
 - Anything about quality on a live store. What auto-capture would write, how often it duplicates a memory you would have written yourself, and what it costs remain unmeasured. `bench/capture-trigger-results.md` is a **bench** simulation of trigger *timing* with a scripted extractor — its compaction world captured 0 rows and 4 of its 6 controls report FAIL. It answers "which moment is worth mining", not "does the shipped feature work".

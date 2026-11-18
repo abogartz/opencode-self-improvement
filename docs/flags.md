@@ -4,6 +4,13 @@ The three flags that encode a measured finding rather than a preference:
 what each one enforces, the evidence behind it, and what an invalid value
 does. The README's table gives the default and the effect.
 
+`OPENCODE_MEMORY_SYMPTOM` is the clearest case. A lesson saved as "in this
+session we fixed the flaky test" shares no words with the query a future
+session types, so it gets filed and never found: measured, 0 of 8 diary-shaped
+rows surfaced, against ranks 1–7 when the same lesson opens with the symptom.
+The flag therefore refuses the diary form at the write gate instead of storing
+something unrecoverable.
+
 ## Flag behaviour
 
 | Variable | Full behaviour |

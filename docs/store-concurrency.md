@@ -1,5 +1,10 @@
 # Store concurrency, publication and permissions
 
+Replacing a store file while other sessions are reading it is the whole
+problem. The answer is a book swap, not a page rewrite: the writer builds the
+complete new file, then swaps it in under a lock. A reader therefore sees the
+old file or the new one, never a half-written record.
+
 How a store file is replaced, what the lock covers, and what the plugin
 does and does not do about permissions. The README states the user-visible
 rules and links here.
@@ -10,4 +15,12 @@ The lock covers one **file**, not the store directory. Two sessions writing diff
 
 Two unsupported placements. The write-ahead log needs mmap'd shared memory, which SQLite does not provide on network filesystems, so a memory root on SMB, NFS or a OneDrive-mounted folder is **not supported**: writes there can report a disk I/O error rather than serialise. Configure `OPENCODE_MEMORY_DIR` on local disk. And during the update that introduced this lock, a session still running the previous release honours `<date>.logfmt.lock` while an updated session honours the SQLite lock, so those two do not exclude each other until every running session has restarted.
 
-On POSIX systems, new store directories use owner-only `0700` permissions and new files use `0600` (subject to a more restrictive umask). This includes temporary replacements, snapshots, locks (the lock database beside each store file), status files, and append-only logs. Accessing an existing store attempts to remove group/other permissions from its root; existing directories and appended/status files are tightened when written, without adding owner permissions. Old descendants are not recursively migrated: a successfully tightened root prevents other users from traversing to them. If directory chmod reports `EPERM`, `EROFS`, `EOPNOTSUPP`, or `ENOSYS` (for example an immutable or foreign-owned root, or a mount without chmod support), reads remain available with the existing permissions: owner-only traversal is not guaranteed. Correct ownership, mount support, or permissions outside the plugin when that privacy guarantee is required. File permission enforcement on writes remains unchanged. Existing ancestors outside the store are left unchanged. A store root that is itself a symlink is refused; configure its real directory instead. These modes do not revoke already-open handles or protect copies/hard links outside the private root. On Windows, privacy depends on the directory's ACL; the plugin does not change Windows ACLs.
+On POSIX systems, new store directories use owner-only `0700` permissions and new files use `0600` (subject to a more restrictive umask) — including temporary replacements, snapshots, locks, status files and append-only logs. Accessing an existing store removes group/other permissions from its root, and tightens directories and files as they are written. Old descendants are not migrated recursively: a tightened root already stops other users from reaching them.
+
+Three limits on that guarantee, stated plainly because they are privacy limits.
+
+1. If chmod reports `EPERM`, `EROFS`, `EOPNOTSUPP` or `ENOSYS` — an immutable root, a foreign-owned root, or a mount without chmod support — reads stay available under the existing permissions, so owner-only traversal is **not** guaranteed. Fix ownership, mount support or permissions outside the plugin when that guarantee is required.
+2. The modes do not revoke handles that are already open, and they do not protect copies or hard links made outside the private root.
+3. On Windows the plugin changes no ACLs; privacy there depends entirely on the directory's existing ACL.
+
+A store root that is itself a symlink is refused; configure its real directory instead. Ancestors outside the store are left as they are.
