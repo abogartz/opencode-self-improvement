@@ -36,6 +36,7 @@
     "src",
     "command",
     "vendor",
+    "docs",
     "README.md",
     "LICENSE"
   ],

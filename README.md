@@ -86,7 +86,9 @@ Anything else goes in the object form of the plugin entry in `opencode.json(c)`:
 }
 ```
 
-The capture options (`autoCapture`, `captureModel`, `captureMax`, `captureOnCompact`, `captureGuidedRules`) are described where the feature is: [Auto-capture](#auto-capture). `contradictionSurface` is described with the verdict table in [Contradiction authority policy](#contradiction-authority-policy-experimental-349--351). Every option and environment variable, including what an invalid value does: [docs/options.md](docs/options.md) — and read [docs/flags.md](docs/flags.md) before flipping `OPENCODE_MEMORY_DEDUP`, `OPENCODE_MEMORY_SYMPTOM` or `OPENCODE_MEMORY_QUERY_GATE`, because each one switches off behaviour a measurement decided.
+The capture options (`autoCapture`, `captureModel`, `captureMax`, `captureOnCompact`, `captureGuidedRules`) are described where the feature is: [Auto-capture](#auto-capture). `contradictionSurface` is described with the verdict table in [Contradiction authority policy](#contradiction-authority-policy-experimental-349--351). Every option and environment variable, including what an invalid value does: [docs/options.md](docs/options.md).
+
+Read [docs/flags.md](docs/flags.md) before flipping `OPENCODE_MEMORY_DEDUP`, `OPENCODE_MEMORY_SYMPTOM` or `OPENCODE_MEMORY_QUERY_GATE`. Each switches off behaviour a measurement decided, and each has an invalid-value rule that surprises people: an out-of-range `DEDUP` turns the suppression pass off rather than clamping to the nearest bound, and a metadata-only `memory_update` is exempt from `SYMPTOM` so legacy rows can still be retagged.
 
 ## Auto-capture
 
