@@ -1,5 +1,9 @@
 # Pre-release ritual: mutation sweep and artifact policy
 
+A fire drill for the test suite: break one claimed invariant on purpose and
+see whether anything notices. A mutant that no test kills is not a scandal —
+it is a list of what the suite has been claiming without pinning.
+
 What `scripts/test-sweep.ts` measures, when a person runs it, and which
 benchmark artifacts stay out of git.
 

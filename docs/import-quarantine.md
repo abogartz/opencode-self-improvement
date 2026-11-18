@@ -1,5 +1,8 @@
 # Import, quarantine and the viewer's edit path
 
+A quarantined row is a spam-folder row, not a deleted one: it stays in the
+store where you can read it, and is withheld from everything the model reads.
+
 What the prose screen catches and misses, how an existing store gets
 re-tagged, what releasing quarantine does, and which writes it does not
 cover. The README keeps the export/import contract and the tally.
@@ -18,4 +21,16 @@ The viewer is a trusted admin editor: its edits and deleted-entry restores do no
 
 Existing stores are not rescanned. A byte-identical import that collapses into an existing row does not retroactively tag that row. Export preserves quarantined rows and their tags to avoid data loss; an exported released row can be quarantined again when re-import promotes it on another machine.
 
-An open row is exempt from reference grounding, so that status is honored only for files carrying an export header. Even with a header: an open row claiming `repo:"global"` is downgraded, and imported `repo` / `repoPath` stamps are kept only when they match the importing session's current repo — foreign stamps are dropped and the row is stamped for the importing repo. Re-running the same import in the same repo is a no-op.
+## The file format, and what an import will believe
+
+A header line (`{_export, version, exportedAt, count}`) followed by one JSON object per line (`{ts,type,scope,content,status,tags,issue}`), active rows only.
+
+An open row is exempt from reference grounding, so that status is honored only for files carrying an export header — a hand-written file without one imports such rows as settled. Even with a header: an open row claiming `repo:"global"` is downgraded, and imported `repo` / `repoPath` stamps are kept only when they match the importing session's current repo — foreign stamps are dropped and the row is stamped for the importing repo. Re-running the same import in the same repo is a no-op.
+
+## Keeping a path inside the store
+
+Both tools are model-facing, so a path is treated as untrusted input rather than as permission. An export cannot write to `~/.gitconfig` or anywhere else outside the store, and an import cannot read outside it. Symbolic links are resolved before the check — including an `exports/` directory that is itself a link — so a link cannot carry a request out of the store. Exports are written `0600` and opened `O_NOFOLLOW` (both POSIX; on Windows the check before the write is the only guard).
+
+The default name is `<memory-root>/exports/<timestamp>-<unique>.jsonl`, created exclusively, so two exports in the same second never replace each other's artifact.
+
+Two limits no path check can close. A hard link planted inside `exports/` shares an inode with its target, so writing through it writes the target. And the check covers the final component more tightly than the intermediate path components, leaving a narrow window there. Both are stated rather than fixed because closing them means giving up the feature.
