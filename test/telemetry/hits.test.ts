@@ -4,6 +4,7 @@
 // be written into `terms`, what the ledger can honestly claim about rows it
 // has never seen, and the qualifier the surfaces must carry when the ledger
 // is too young to call anything "never retrieved".
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   closeSync,
@@ -31,7 +32,11 @@ import {
 } from "../../src/status/store-summary.ts";
 import { appendMemory } from "../../src/store/files/append.ts";
 import { loadAll } from "../../src/store/files/load.ts";
-import { LOCK_WRITE, withStoreLock } from "../../src/store/lock.ts";
+import {
+  lockDatabaseFor,
+  LOCK_WRITE,
+  withStoreLock,
+} from "../../src/store/lock.ts";
 import type { Memory } from "../../src/store/model/memory.ts";
 import {
   getDroppedOutcomeWrites,
@@ -108,6 +113,55 @@ describe("the ledger line", () => {
     expect(ledger.lines).toBe(1);
   });
 
+  test("a timed-out pull preserves the queue for pending and later gate writers", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const holder = withStoreLock(hitsFile(), async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    await entered.promise;
+    const now = Date.now();
+    const pull = recordHits("pull", "s", [row("one")], [], now, 1, "turn", {
+      lockWaitMs: 50,
+      observedAt: now,
+    });
+    const waiting = recordOutcome("s", 1, "PASS", "first");
+    const saved = await pull;
+    const arriving = recordOutcome("s", 2, "PASS", "second");
+    release.resolve();
+    await holder;
+    expect(saved).toBe(false);
+    expect(await Promise.all([waiting, arriving])).toEqual([true, true]);
+    expect((await readOutcomes()).map((outcome) => outcome.cmd)).toEqual([
+      "first",
+      "second",
+    ]);
+    expect(getDroppedOutcomeWrites()).toBe(0);
+  });
+
+  test("a cold ledger lock respects the receipt budget during legacy journal conversion", async () => {
+    const db = new Database(lockDatabaseFor(hitsFile()));
+    const rows = [row("2026-01-01T00:00:00.000Z")];
+    const receipt = (sid: string) =>
+      recordHits("pull", sid, rows, [], Date.now(), 1, "turn", {
+        lockWaitMs: 50,
+        observedAt: Date.now(),
+      });
+    try {
+      db.run("PRAGMA journal_mode = WAL");
+      db.run("BEGIN IMMEDIATE");
+      const start = performance.now();
+      expect(await receipt("held")).toBe(false);
+      expect(performance.now() - start).toBeLessThan(1000);
+      expect((await readRides()).length).toBe(0);
+    } finally {
+      db.close();
+    }
+    expect(await receipt("released")).toBe(true);
+    expect((await readRides()).map((ride) => ride.sid)).toEqual(["released"]);
+  });
+
   test("an empty row-set is not a use, and terms are capped", async () => {
     expect(await recordHits("inject", "s", [], ["x"])).toBe(false);
     const many = Array.from({ length: 12 }, (_, i) => `term${i}`);
@@ -139,6 +193,23 @@ describe("the ledger line", () => {
 });
 
 describe("the throttle", () => {
+  test("observing a delayed pull changes the ride timestamp but preserves the placement throttle", async () => {
+    const t = Date.parse("2026-11-21T12:00:00.000Z");
+    const rows = [row("2026-11-20T10:00:00Z")];
+    const receipt = (placed: number, observed: number) =>
+      recordHits("pull", "delayed", rows, [], placed, 1, "turn", {
+        lockWaitMs: 50,
+        observedAt: observed,
+      });
+    expect(await receipt(t, t + 600_000)).toBe(true);
+    expect(await receipt(t + 3_599_999, t + 4_100_000)).toBe(false);
+    expect(await receipt(t + 3_600_001, t + 4_100_001)).toBe(true);
+    expect((await readRides()).map((ride) => ride.ts)).toEqual([
+      new Date(t + 600_000).toISOString(),
+      new Date(t + 4_100_001).toISOString(),
+    ]);
+  });
+
   test("a filesystem lock refusal backs off repeated calls, then permits another attempt", async () => {
     const t0 = Date.parse("2026-06-01T00:00:00Z");
     const rows = [row("2026-01-01T00:00:00.000Z")];
@@ -564,6 +635,44 @@ describe("the surfaces read the ledger honestly", () => {
 describe.skipIf(process.platform !== "win32")(
   "ledger rotation under Windows reader contention",
   () => {
+    test("a request-time pull gives up a refused rotation without waiting for reader retries", async () => {
+      const original = "ev=padding filler=" + "x".repeat(2_100_000) + "\n";
+      writeFileSync(hitsFile(), original);
+      const fd = openSync(hitsFile(), "r");
+      const started = performance.now();
+      try {
+        const now = Date.now();
+        expect(
+          await recordHits(
+            "pull",
+            "busy-reader",
+            [row("2026-11-21T10:00:00Z")],
+            [],
+            now,
+            1,
+            "turn",
+            { lockWaitMs: 50, observedAt: now },
+          ),
+        ).toBe(false);
+        expect(performance.now() - started).toBeLessThan(800);
+        expect(ledgerText()).toBe(original);
+      } finally {
+        closeSync(fd);
+      }
+      const now = Date.now() + 10000;
+      expect(
+        await recordHits(
+          "pull",
+          "released-reader",
+          [row("2026-11-21T10:00:00Z")],
+          [],
+          now,
+          1,
+          "turn",
+          { lockWaitMs: 50, observedAt: now },
+        ),
+      ).toBe(true);
+    });
     test("a rotation against a reader holding the ledger retries and lands, not silently fails", async () => {
       const filler = Array.from(
         { length: 40_000 },

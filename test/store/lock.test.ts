@@ -498,6 +498,43 @@ describe("broken lock database", () => {
     expect(message).not.toMatch(/busy/);
   });
 
+  test("cold WAL contention emits one timeout per acquisition even across a backward wall-clock step", async () => {
+    const { Database } = await import("bun:sqlite");
+    const file = join(tmp(), "journal.logfmt");
+    const db = new Database(lockDatabaseFor(file));
+    const wall = Date.now;
+    const events: string[] = [];
+    let runs = 0;
+    const write = async () => ++runs;
+    const opts = {
+      timeoutMs: 50,
+      onEvent: (event: string) => events.push(event),
+    };
+    let jump: ReturnType<typeof setTimeout> | undefined;
+    try {
+      db.run("PRAGMA journal_mode = WAL");
+      db.run("BEGIN IMMEDIATE");
+      jump = setTimeout(() => {
+        Date.now = () => wall() - 3000;
+      }, 5);
+      const start = performance.now();
+      await expect(withStoreLock(file, write, opts)).rejects.toThrow(/busy/);
+      expect(Date.now()).toBeLessThan(wall() - 2000);
+      expect(performance.now() - start).toBeLessThan(1000);
+      expect(runs).toBe(0);
+      expect(
+        await withStoreLock(file, write, { ...opts, onTimeout: "proceed" }),
+      ).toBe(1);
+      expect(events).toEqual(["timeout", "timeout"]);
+    } finally {
+      clearTimeout(jump);
+      Date.now = wall;
+      db.close();
+    }
+    expect(await withStoreLock(file, write, opts)).toBe(2);
+    expect(events).toHaveLength(2);
+  });
+
   test("a lock database is rollback mode, and a legacy WAL one is converted", async () => {
     // The lock transaction dirties no page, so rollback mode never journals:
     // one file per lock. WAL would add -wal and -shm beside every lock for the

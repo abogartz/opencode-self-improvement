@@ -6,7 +6,9 @@
 // What a "use" is, deliberately narrow:
 //   inject  — the rows that actually survived into an epoch block (offered to
 //             the model on every request of that epoch);
-//   pull    — rows appended to a grep/glob/read result by the contextual pull;
+//   pull    — rows appended to a grep/glob/read result by the contextual pull
+//             and still whole in the next request for that call
+//             (src/inject/pull-receipts.ts);
 //   recall  — rows returned by a memory_recall call.
 //
 // What it is NOT: evidence is a different file and a different contract. This
@@ -28,6 +30,8 @@ import type { UseSignals } from "../recall/relevant.ts";
 import { withStoreLock, LOCK_WRITE } from "../store/lock.ts";
 import type { Memory } from "../store/model/memory.ts";
 import type { ReadSet } from "../consolidate/propose.ts";
+
+import { type EvidenceContext, record } from "./record.ts";
 
 export type HitSource = "inject" | "pull" | "recall";
 
@@ -95,7 +99,7 @@ export function resetHitThrottle(): void {
   nextAttempt.clear();
 }
 
-async function rotateIfNeeded(): Promise<void> {
+async function rotateIfNeeded(retryRename = true): Promise<void> {
   let size: number;
   try {
     size = (await stat(hitsFile())).size;
@@ -107,7 +111,9 @@ async function rotateIfNeeded(): Promise<void> {
   // anchor the halving like every other whole-file publish - on
   // Windows the rename can be refused by a reader's handle, and the retry is
   // only safe while nothing else moved this file.
-  const since = await fileIdentity(hitsFile());
+  // A request-time pull attempts the atomic handover once. Other writers
+  // retain the identity-checked retry window for transient Windows readers.
+  const since = retryRename ? await fileIdentity(hitsFile()) : undefined;
   const lines = (await readFile(hitsFile(), "utf8"))
     .split("\n")
     .filter((l) => l.trim());
@@ -136,6 +142,12 @@ export async function recordHits(
   now = Date.now(),
   turn?: number,
   turnKey?: string,
+  receipt?: {
+    lockWaitMs: number;
+    observedAt: number;
+    tool?: string;
+    evidence?: EvidenceContext;
+  },
 ): Promise<boolean> {
   if (!rows.length) return false;
   const ids = rows.map((m) => m.ts);
@@ -143,9 +155,21 @@ export async function recordHits(
   if (inFlight.has(key)) return false;
   const eligibleAt = nextAttempt.get(key);
   if (eligibleAt !== undefined && now < eligibleAt) return false;
+  if (receipt && receipt.lockWaitMs <= 0) {
+    if (receipt.evidence && receipt.tool) {
+      await record(
+        "pull_credit_skipped",
+        { tool: receipt.tool, rows: rows.length, reason: "budget" },
+        false,
+        sid,
+        receipt.evidence,
+      ).catch(() => undefined);
+    }
+    return false;
+  }
   const line = formatLine({
     ev: "memory_used",
-    ts: new Date(now).toISOString(),
+    ts: new Date(receipt?.observedAt ?? now).toISOString(),
     src: source,
     sid,
     mem: bracketList(ids),
@@ -162,14 +186,29 @@ export async function recordHits(
   });
   inFlight.add(key);
   let cooldown = RETRY_BACKOFF_MS;
+  const evidence = receipt?.evidence;
+  const lock = receipt
+    ? { ...LOCK_WRITE, timeoutMs: receipt.lockWaitMs }
+    : LOCK_WRITE;
+  if (receipt && evidence) {
+    lock.onEvent = (event, waitedMs) => {
+      void record(
+        "store_lock",
+        { event, waited_ms: waitedMs, op: "write" },
+        false,
+        sid,
+        evidence,
+      ).catch(() => undefined);
+    };
+  }
   try {
     await withStoreLock(
       hitsFile(),
       async () => {
-        await rotateIfNeeded();
+        await rotateIfNeeded(!receipt);
         await appendLog(hitsFile(), line);
       },
-      LOCK_WRITE,
+      lock,
     );
     cooldown = THROTTLE_MS;
     return true;
@@ -177,6 +216,15 @@ export async function recordHits(
     // Fail-closed lock contention can drop this use observation. Decay and
     // consolidation therefore see a best-effort ledger, not proof of non-use;
     // retrieval remains available even when its telemetry cannot be persisted.
+    if (evidence && receipt?.tool) {
+      await record(
+        "pull_credit_skipped",
+        { tool: receipt.tool, rows: rows.length, reason: "write_failed" },
+        false,
+        sid,
+        evidence,
+      ).catch(() => undefined);
+    }
     return false; // telemetry never breaks retrieval
   } finally {
     nextAttempt.set(key, now + cooldown);

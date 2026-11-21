@@ -1,5 +1,6 @@
 // Host hook registration and measured-usage listener. Setup owns the
 // returned controller and supplies the live compaction-capture callback.
+import { randomBytes } from "node:crypto";
 import type { PluginCtx } from "./core/host.ts";
 import type { guarded as Guarded } from "./core/hooks.ts";
 import type { createInjectionEpochs } from "./inject/epochs.ts";
@@ -27,12 +28,27 @@ import { recordSessionModel } from "./capture/session-model.ts";
 import {
   contextualPull,
   PULL_SHIPPED,
+  PULL_HEADER,
   type PullScope,
   pullQueryFor,
   writePullIntoResult,
 } from "./inject/pull.ts";
-import { record } from "./telemetry/record.ts";
+import { createPullReceipts, type PullLoss } from "./inject/pull-receipts.ts";
+import { formatMemory } from "./inject/format.ts";
+import { peekTurn } from "./core/state.ts";
+import { captureEvidenceContext, record } from "./telemetry/record.ts";
 import { compactionAnchor } from "./inject/anchor.ts";
+
+/** Placement and observation clocks for a deferred pull receipt. */
+export interface RideAt {
+  lockWaitMs: number;
+  tool: string;
+  evidence: ReturnType<typeof captureEvidenceContext>;
+  placedAt: number;
+  observedAt: number;
+  turn?: number;
+  turnKey?: string;
+}
 
 interface HookDependencies {
   guarded: typeof Guarded;
@@ -44,6 +60,7 @@ interface HookDependencies {
     sid: string,
     rows: Memory[],
     query: string,
+    at?: RideAt,
   ) => Promise<void>;
   bindSessionIdentity: (sid: string | undefined) => Promise<void>;
   bindSessionFromApi: (sid: string | undefined) => Promise<void>;
@@ -82,6 +99,26 @@ function resultMeta(result: unknown): Record<string, unknown> {
   return {};
 }
 
+// Counts only: a lost pull names its tool and how many rows, never the rows'
+// text or the tool's output. `trimmed` is the same failure `pull_undelivered`
+// already names at placement, seen one step later.
+async function reportPullLosses(losses: PullLoss[]): Promise<void> {
+  for (const loss of losses)
+    await record(
+      loss.reason === "trimmed" ? "pull_undelivered" : "pull_unconfirmed",
+      {
+        tool: loss.held.tool,
+        rows: loss.rows,
+        ...(loss.reason === "trimmed"
+          ? { stage: "request" }
+          : { reason: loss.reason }),
+      },
+      false,
+      loss.held.sid,
+      loss.held.evidence,
+    );
+}
+
 export async function registerHooks(
   ctx: PluginCtx,
   {
@@ -98,6 +135,9 @@ export async function registerHooks(
     getCompactCapture,
   }: HookDependencies,
 ) {
+  // Pulls placed on a tool result, waiting for the request that carries them.
+  const receipts = createPullReceipts();
+
   // Bookkeeping: track the active session/tool/call before a tool runs.
   await ctx.tool?.hook("execute.before", (event: any) =>
     guarded("tool.execute.before", async () => {
@@ -125,6 +165,7 @@ export async function registerHooks(
       if (typeof event?.sessionID === "string") {
         bindSessionProvisional(event.sessionID, instanceDir);
       }
+      const evidence = captureEvidenceContext(input.sessionID);
       const out = {
         output: resultText(event?.result),
         metadata: resultMeta(event?.result),
@@ -133,50 +174,111 @@ export async function registerHooks(
       // Capture the text BEFORE the pull appends to it, so the write-back can
       // place just the appended block instead of duplicating the tool output.
       const textBefore = typeof out.output === "string" ? out.output : "";
+      const header = `${PULL_HEADER} [${randomBytes(8).toString("hex")}]`;
       const pulled = await contextualPull(
         input,
         out as { output?: unknown },
         budget,
         await useSignals(),
         pullScope,
+        header,
       );
-      // Deliver FIRST, credit AFTER: the ledger counts rows the model was shown.
-      // The old order credited every computed pull, so a result shape the host
-      // no longer hands back as a string (v2.3.0 sends a parts ARRAY) left 456
-      // `src=pull` credits against zero bytes delivered — the exact overclaim
-      // this ledger exists to avoid. `pull_undelivered` makes the failure
-      // readable instead of merely smaller.
       const shown =
         pulled.length > 0 && typeof out.output === "string"
           ? writePullIntoResult(event?.result, textBefore, out.output)
           : false;
-      if (shown)
-        await noteHits(
-          "pull",
-          String(event?.sessionID ?? ""),
-          pulled,
-          // The query the pull ACTUALLY searched, so the ledger's shared terms
-          // describe the same match the model was shown — with the same scope,
-          // from the same function, so the two cannot drift apart.
-          pullQueryFor(
-            String(event?.tool ?? ""),
-            input.args,
-            textBefore,
-            pullScope,
-          ),
+      // Placed is not yet delivered: a later plugin's execute.after hook can
+      // still trim this result. Hold the credit; the next request for
+      // this session settles it against the tool-result it actually carries.
+      // Turn and time are read NOW, so the credit names the turn the ride
+      // landed on and throttles on the placement's own clock.
+      const sid = String(event?.sessionID ?? "");
+      const callID = typeof input.callID === "string" ? input.callID : "";
+      if (shown && sid && callID) {
+        const observed = peekTurn(sid);
+        await reportPullLosses(
+          receipts.hold({
+            sid,
+            callID,
+            header,
+            evidence,
+            tool: String(event?.tool ?? ""),
+            rows: pulled,
+            lines: pulled.map(formatMemory),
+            query: pullQueryFor(
+              String(event?.tool ?? ""),
+              input.args,
+              textBefore,
+              pullScope,
+            ),
+            at: Date.now(),
+            turn: observed?.turn,
+            turnKey: observed?.key,
+          }),
+        );
+      } else if (shown)
+        // No session or call ID: no request can be matched to this placement,
+        // so it is reported and never credited.
+        await record(
+          "pull_unconfirmed",
+          {
+            tool: String(event?.tool ?? ""),
+            rows: pulled.length,
+            reason: "no_call",
+          },
+          false,
+          input.sessionID,
+          evidence,
         );
       else if (pulled.length)
         await record(
           "pull_undelivered",
           { tool: String(event?.tool ?? ""), rows: pulled.length },
           false,
+          input.sessionID,
+          evidence,
         );
     }),
   );
 
-  // Tiny system digest + open-thread frontier block, injected into the system prompt.
-  await ctx.session?.hook("context", (event: any) =>
-    guarded("session.context (systemDigest)", async () => {
+  // One context hook, two guarded sections, so a failure in one cannot skip
+  // the other.
+  //
+  // Pull receipts run first: this request's messages are what the host
+  // is about to send, after every execute.after hook has run. The held pulls
+  // whose tool-result reached it are credited, only for the rows whose line
+  // survived. Settled synchronously on entry, so two requests cannot both
+  // credit one placement; a failed ledger write is not retried from here.
+  //
+  // Then the tiny system digest + open-thread frontier block, injected into
+  // the system prompt.
+  await ctx.session?.hook("context", async (event: any) => {
+    await guarded("session.context (pull receipt)", async () => {
+      const sid =
+        typeof event?.sessionID === "string" ? event.sessionID : undefined;
+      const observedAt = Date.now();
+      const { credits, losses } = receipts.settle(
+        sid,
+        event?.messages,
+        observedAt,
+      );
+      // All pull receipts in this request share one lock-wait budget.
+      const deadline = performance.now() + 50;
+      for (const { held, rows } of credits) {
+        const lockWaitMs = Math.max(0, Math.ceil(deadline - performance.now()));
+        await noteHits("pull", held.sid, rows, held.query, {
+          lockWaitMs,
+          tool: held.tool,
+          evidence: held.evidence,
+          placedAt: held.at,
+          observedAt,
+          turn: held.turn,
+          turnKey: held.turnKey,
+        });
+      }
+      await reportPullLosses(losses);
+    });
+    await guarded("session.context (systemDigest)", async () => {
       // Route store reads in this hook through the right session's scope:
       // the sid is captured from the event BEFORE any await and carried
       // explicitly — the global current set here is legacy bookkeeping
@@ -199,8 +301,8 @@ export async function registerHooks(
       await sessions.deliver(sid, (text) =>
         event?.system?.push?.({ type: "text", text }),
       );
-    }),
-  );
+    });
+  });
 
   // Memory-first injection, frozen per epoch (cache-safe). Remember the
   // latest user prompt here; the request-time context hook builds or

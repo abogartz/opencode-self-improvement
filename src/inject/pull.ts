@@ -9,6 +9,10 @@ import { formatMemory } from "./format.ts";
 import { type UseSignals, argText } from "../recall/relevant.ts";
 import { scoreMemories } from "../recall/score.ts";
 
+// The pull block's first line. Exported so a receipt can find the block in
+// the tool-result the host is about to send (src/inject/pull-receipts.ts).
+export const PULL_HEADER = `## Related durable memory (pull)${FRAME}`;
+
 export interface TransformOutput {
   system: string[];
 }
@@ -34,20 +38,17 @@ export interface PullOutput {
 // string in `content`, which is the shape this function was originally written
 // against, and a string `output` is covered too.
 //
-// Returns true only when the bytes were placed. The caller credits the ledger
-// with what rode, never with what was merely computed: a pull that found nowhere
-// to write showed the model nothing.
+// Returns true only when the bytes were placed. A pull that found nowhere to
+// write showed the model nothing. Placement is still not delivery: a later
+// plugin's hook can trim the result, so the caller only HOLDS the credit and
+// the next request settles it (src/inject/pull-receipts.ts).
 export function writePullIntoResult(
   result: unknown,
   before: string,
   after: string,
 ): boolean {
   if (!result || typeof result !== "object") return false;
-  // contextualPull APPENDS to the text it was handed, so isolate that append.
-  // If the value no longer carries it — another hook rewrote the result between
-  // the pull and here — there is no safe place for the block: assigning would
-  // clobber the other hook and appending the whole value would duplicate the
-  // tool output. Report failure and let the caller log `pull_undelivered`.
+  // Compare the two local strings to isolate the suffix this hook appended.
   if (!after.startsWith(before)) return false;
   const block = after.slice(before.length);
   if (!block) return false;
@@ -244,6 +245,7 @@ export async function contextualPull(
   budget = injectBudget(),
   use?: UseSignals,
   scope: PullScope = PULL_SHIPPED,
+  header = PULL_HEADER,
 ): Promise<Memory[]> {
   const tool = typeof input.tool === "string" ? input.tool : "";
   const own = typeof output.output === "string" ? output.output : "";
@@ -279,7 +281,6 @@ export async function contextualPull(
   if (!merged.length) return [];
   // Held to the injection budget too: three long rows were ~12 KB per call.
   if (typeof output.output !== "string") return [];
-  const header = `## Related durable memory (pull)${FRAME}`;
   const lines = merged.map(formatMemory);
   const kept = fittingLineIndices(lines, budget - header.length);
   if (!kept.length) return [];

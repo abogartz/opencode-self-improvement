@@ -7,7 +7,7 @@
 // OpenCode V2 session/tool API. Slash commands are installed as markdown by
 // src/command.ts. The default export `{ id, setup(ctx) }` is checked against
 // the SDK's Plugin type using a type-only import (see the note on `plugin`).
-import { registerHooks } from "./events.ts";
+import { registerHooks, type RideAt } from "./events.ts";
 import { forgetUsage } from "./identity/host-events.ts";
 import { guarded, setGuardedFailureReporter } from "./core/hooks.ts";
 import type { PluginCtx } from "./core/host.ts";
@@ -190,6 +190,8 @@ const impl = {
       sid: string,
       rows: Memory[],
       query: string,
+      // Deferred pull credits retain the original turn and throttle window.
+      at?: RideAt,
     ): Promise<void> => {
       if (!rows.length || !query.trim()) return;
       const terms: string[] = [];
@@ -199,15 +201,16 @@ const impl = {
       // the turn is what joins a ride to the outcome of that same turn.
       // Read, never created-for: markTurn has already run for any session that
       // can reach a read path, so this does not seed state.
-      const observed = peekTurn(sid);
+      const observed = at ? { turn: at.turn, key: at.turnKey } : peekTurn(sid);
       await recordHits(
         src,
         sid,
         rows,
         terms,
-        Date.now(),
+        at?.placedAt ?? Date.now(),
         observed?.turn,
         observed?.key,
+        at,
       );
     };
     // The host listener owns measured usage; the epoch controller drops it

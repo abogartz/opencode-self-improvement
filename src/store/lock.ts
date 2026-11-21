@@ -98,7 +98,6 @@ import { record } from "../telemetry/record.ts";
  */
 const lockDatabaseName = (file: string): string =>
   `.store-lock.${basename(file)}.sqlite`;
-const DEFAULT_TIMEOUT_MS = 10_000;
 // The budget must exceed the worst LEGITIMATE wait, not just an idle section.
 // A whole-file publish inside a section can spend 2000 ms in `handoverRename`
 // retrying a rename Windows refuses while a reader holds the destination
@@ -108,23 +107,11 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 // reported "locked for 5001ms" while the holder was mid-handover-retry, not
 // wedged. 10 s still fails closed and reports, but stops refusing writes that
 // were simply behind two honest retries.
-// the default policy is fail-closed, the policy moved every
-// production writer to. A writer that omits opts must refuse at the deadline,
-// not silently reintroduce the unlocked-proceed row loss the LOCK_WRITE
-// contract retired. "proceed" survives only as an explicit opt-in.
-const DEFAULT_ON_TIMEOUT = "fail";
+const DEFAULT_TIMEOUT_MS = 10_000;
 const MIN_BACKOFF_MS = 1;
 const MAX_BACKOFF_MS = 25;
-// Leaving a legacy WAL journal is a once-per-process-per-lock setup step, not
-// the hot path, so it gets its own bound rather than the caller's budget.
+// Legacy journal conversion has its own ceiling within the acquisition deadline.
 const JOURNAL_CONVERT_BUDGET_MS = 5_000;
-
-// The one source of the timeout policy: both give-up paths — the FIFO
-// hand-off and the SQLite wait — resolve through here, so the fail-closed
-// default cannot drift between them.
-function timeoutPolicy(opts: LockOptions): "proceed" | "fail" {
-  return opts.onTimeout === "proceed" ? "proceed" : DEFAULT_ON_TIMEOUT;
-}
 
 /**
  * `timeout`: waited past the budget. `reset`: a release was refused, so the
@@ -169,18 +156,34 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const busyMessage = (file: string, waitedMs: number): string =>
   `memory store is busy: ${basename(file)} has been locked for ${waitedMs}ms — retry`;
 
-// Resolves when the task stored as this key has finished, handing the turn to
-// whoever queued after it.
-const turns = new Map<string, Promise<void>>();
+function onLockTimeout<T>(
+  file: string,
+  fn: () => Promise<T>,
+  opts: LockOptions,
+  waited: number,
+): Promise<T> {
+  const ms = Math.round(waited);
+  opts.onEvent?.("timeout", ms);
+  if (opts.onTimeout === "proceed") return fn();
+  throw new Error(busyMessage(file, ms));
+}
 
-async function timed(prev: Promise<void>, ms: number): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const gained = await Promise.race([
-    prev.then(() => true),
-    new Promise<boolean>((res) => (timer = setTimeout(() => res(false), ms))),
-  ]);
-  clearTimeout(timer);
-  return gained;
+// An entry exists while one owner holds the turn. Waiters can leave the FIFO
+// on timeout without releasing the owner or waking its successor.
+const turns = new Map<string, Set<() => void>>();
+
+function waitForTurn(waiters: Set<() => void>, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const grant = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      waiters.delete(grant);
+      resolve(false);
+    }, ms);
+    waiters.add(grant);
+  });
 }
 
 /**
@@ -337,7 +340,10 @@ async function harden(dbPath: string): Promise<void> {
   await chmod(dbPath, 0o600).catch(() => undefined);
 }
 
-async function lockDatabase(dbPath: string): Promise<Database> {
+async function lockDatabase(
+  dbPath: string,
+  deadline: number,
+): Promise<Database | undefined> {
   const cached = lockDbs.get(dbPath);
   if (cached) {
     // Touch: this directory is in use, so it moves to the protected end of the
@@ -367,7 +373,10 @@ async function lockDatabase(dbPath: string): Promise<Database> {
     // policy stays ours — async, bounded, and sharing one budget with the FIFO
     // hand-off above.
     db.run("PRAGMA busy_timeout = 0");
-    await ensureLockJournal(db, dbPath);
+    if (!(await ensureLockJournal(db, dbPath, deadline))) {
+      db.close();
+      return undefined;
+    }
   } catch (err) {
     db.close();
     throw err;
@@ -402,14 +411,18 @@ const journalMode = (db: Database): string =>
  * LEAVE WAL is refused rather than run that way: the sidecar churn would come
  * back per store, silently.
  */
-async function ensureLockJournal(db: Database, dbPath: string): Promise<void> {
+async function ensureLockJournal(
+  db: Database,
+  dbPath: string,
+  deadline: number,
+): Promise<boolean> {
+  const started = performance.now();
+  const until = Math.min(deadline, started + JOURNAL_CONVERT_BUDGET_MS);
   let backoff = MIN_BACKOFF_MS;
-  let waited = 0;
   for (;;) {
-    const step = Date.now();
     try {
       const mode = journalMode(db);
-      if (mode === "delete") return;
+      if (mode === "delete") return true;
       db.run("PRAGMA journal_mode = DELETE");
       if (journalMode(db) === "delete") {
         // The conversion checkpoints and removes `-wal`, but `-shm` only goes
@@ -421,7 +434,7 @@ async function ensureLockJournal(db: Database, dbPath: string): Promise<void> {
         // the issue is the Windows delete this module exists to avoid.
         await unlink(`${dbPath}-wal`).catch(() => undefined);
         await unlink(`${dbPath}-shm`).catch(() => undefined);
-        return;
+        return true;
       }
     } catch (err) {
       if (!contention(err)) {
@@ -431,14 +444,10 @@ async function ensureLockJournal(db: Database, dbPath: string): Promise<void> {
         );
       }
     }
-    await sleep(backoff);
-    waited += Date.now() - step;
+    const remaining = until - performance.now();
+    if (remaining <= 0) return false;
+    await sleep(Math.min(backoff, remaining));
     backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
-    if (waited >= JOURNAL_CONVERT_BUDGET_MS) {
-      throw new Error(
-        `store lock could not leave write-ahead journal mode for ${dbPath} after ${waited}ms — another process is holding the lock database in a state that refuses it`,
-      );
-    }
   }
 }
 
@@ -458,24 +467,19 @@ function dropLockDatabase(dbPath: string): void {
   }
 }
 
-/**
- * Cross-process half: hold the lock while `fn` runs. `now` is a seam for tests
- * that must land the deadline inside a specific wait iteration; production
- * callers never pass it and the real clock is used.
- */
+/** Cross-process acquisition uses the same monotonic deadline as the FIFO. */
 async function holdLock<T>(
   dbPath: string,
   file: string,
   fn: () => Promise<T>,
   opts: LockOptions,
-  budgetMs: number,
-  now: () => number = Date.now,
+  started: number,
+  deadline: number,
 ): Promise<T> {
-  let db = await lockDatabase(dbPath);
-  const started = now();
+  let db = await lockDatabase(dbPath, deadline);
   let backoff = MIN_BACKOFF_MS;
   let reconnected = false;
-  for (;;) {
+  while (db) {
     try {
       db.run("BEGIN IMMEDIATE");
       break;
@@ -486,7 +490,7 @@ async function holdLock<T>(
           // try again on a fresh connection; a second failure surfaces.
           reconnected = true;
           dropLockDatabase(dbPath);
-          db = await lockDatabase(dbPath);
+          db = await lockDatabase(dbPath, deadline);
           continue;
         }
         const info = err as { code?: string; errno?: number };
@@ -494,21 +498,14 @@ async function holdLock<T>(
           `[code=${info.code ?? "-"} errno=${info.errno ?? "-"}] store lock unavailable for ${basename(file)}: ${(err as Error).message}`,
         );
       }
-      if (now() - started >= budgetMs) {
-        opts.onEvent?.("timeout", now() - started);
-        if (timeoutPolicy(opts) === "fail") {
-          throw new Error(busyMessage(file, now() - started));
-        }
-        // Proceeding without the lock is the explicit "proceed" opt-in
-        // (no longer the default). heldLocks is deliberately NOT touched
-        // here: a writer that never held the lock must not let a nested call
-        // believe it did.
-        return await fn();
-      }
-      await sleep(backoff);
+      const remaining = deadline - performance.now();
+      if (remaining <= 0)
+        return onLockTimeout(file, fn, opts, performance.now() - started);
+      await sleep(Math.min(backoff, remaining));
       backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
     }
   }
+  if (!db) return onLockTimeout(file, fn, opts, performance.now() - started);
   await harden(dbPath);
   acquiredHook?.(file);
   // Protected from eviction for as long as the section runs: closing a
@@ -527,7 +524,7 @@ async function holdLock<T>(
       db.run("ROLLBACK");
     } catch (err) {
       dropLockDatabase(dbPath);
-      opts.onEvent?.("reset", now() - started);
+      opts.onEvent?.("reset", Math.round(performance.now() - started));
       void err;
     }
   }
@@ -544,16 +541,12 @@ async function acquire<T>(
   opts: LockOptions,
 ): Promise<T> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const started = Date.now();
+  const started = performance.now();
 
   if (busyInjector?.(file)) {
     // Reported exactly as a waited-out budget would report it, so a test that
     // injects a refusal exercises the same policy and message as a real one.
-    opts.onEvent?.("timeout", 0);
-    if (timeoutPolicy(opts) === "fail") {
-      throw new Error(busyMessage(file, 0));
-    }
-    return fn();
+    return onLockTimeout(file, fn, opts, 0);
   }
 
   if (heldLocks.getStore()?.has(dbPath)) {
@@ -565,40 +558,25 @@ async function acquire<T>(
     return await fn();
   }
 
-  let releaseTurn!: () => void;
-  const myTurnEnded = new Promise<void>((res) => (releaseTurn = res));
-  const queuedBehind = turns.get(dbPath);
-  turns.set(dbPath, myTurnEnded);
-
-  const finish = () => {
-    releaseTurn();
-    if (turns.get(dbPath) === myTurnEnded) turns.delete(dbPath);
-  };
-
-  if (queuedBehind) {
-    const gained = await timed(queuedBehind, timeoutMs);
-    if (!gained) {
-      // Give up our place in line rather than park everyone behind us on a
-      // writer that is not going to finish.
-      finish();
-      opts.onEvent?.("timeout", Date.now() - started);
-      if (timeoutPolicy(opts) === "fail") {
-        throw new Error(busyMessage(file, Date.now() - started));
-      }
-      return fn();
-    }
+  let waiters = turns.get(dbPath);
+  if (waiters) {
+    if (!(await waitForTurn(waiters, timeoutMs)))
+      return onLockTimeout(file, fn, opts, performance.now() - started);
+  } else {
+    waiters = new Set();
+    turns.set(dbPath, waiters);
   }
 
   try {
-    return await holdLock(
-      dbPath,
-      file,
-      fn,
-      opts,
-      timeoutMs - (Date.now() - started),
-    );
+    return await holdLock(dbPath, file, fn, opts, started, started + timeoutMs);
   } finally {
-    finish();
+    const next = waiters.values().next().value;
+    if (next) {
+      waiters.delete(next);
+      next();
+    } else {
+      turns.delete(dbPath);
+    }
   }
 }
 
