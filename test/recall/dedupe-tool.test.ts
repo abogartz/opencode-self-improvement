@@ -186,4 +186,61 @@ describe("memory_recall additive clash", () => {
     expect(out).not.toContain("AMBIGUOUS");
     await loaded.cleanup();
   });
+
+  // The checklist stated three ways, then the longer one typed twice, then two
+  // unrelated release rows. The duplicate wins a substitution clash on its way
+  // past a row it is an exact copy of, so it lands in a slot while its own copy
+  // holds another — and `printer`, a distinct match, is the row that pays.
+  const CHECKLIST =
+    "release checklist covers packaging signing testing auditing deployment monitoring alerts backups metrics tracing documentation";
+  const WITH_STAGING = `${CHECKLIST} staging`;
+  function seedChecklistClash(): void {
+    seed(CHECKLIST, "2026-01-01T00:00:00.000Z", "release");
+    seed(WITH_STAGING, "2026-01-01T00:00:01.000Z", "release");
+    seed(
+      CHECKLIST.replace("documentation", "rollbacks"),
+      "2026-01-01T00:00:02.000Z",
+      "release",
+    );
+    seed(WITH_STAGING, "2026-01-01T00:00:03.000Z", "release");
+    seed(
+      "release printer driver requires manual installation",
+      "2026-01-01T00:00:04.000Z",
+      "release",
+    );
+    seed(
+      "release calendar meeting uses the shared agenda",
+      "2026-01-01T00:00:05.000Z",
+      "release",
+    );
+  }
+
+  test("a copy that wins a clash returns once and costs no distinct row its slot", async () => {
+    seedChecklistClash();
+    const loaded = await loadPlugin(root);
+    const out = await loaded.tool.memory_recall!.execute({
+      query: "release",
+      limit: 3,
+    });
+    expect(out.match(/documentation staging/g)?.length).toBe(1);
+    expect(out).toContain("printer driver");
+    expect(out).toContain("calendar meeting");
+    expect(out.match(/^- \[2026-01-01\]/gm)?.length).toBe(3);
+    await loaded.cleanup();
+  });
+
+  test("OPENCODE_MEMORY_AMBIGUOUS=0 returns the same three rows for that fixture", async () => {
+    seedChecklistClash();
+    process.env.OPENCODE_MEMORY_AMBIGUOUS = "0";
+    const loaded = await loadPlugin(root);
+    const out = await loaded.tool.memory_recall!.execute({
+      query: "release",
+      limit: 3,
+    });
+    expect(out.match(/documentation staging/g)?.length).toBe(1);
+    expect(out).toContain("printer driver");
+    expect(out).toContain("calendar meeting");
+    expect(out).not.toContain("AMBIGUOUS");
+    await loaded.cleanup();
+  });
 });

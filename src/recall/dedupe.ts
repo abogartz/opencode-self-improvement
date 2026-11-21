@@ -220,6 +220,13 @@ export interface GroupedWindow {
  * restate. `groups` carries the rows themselves: a later clash overwrites a
  * slot in the window, and a group keyed on that slot would re-point at
  * whatever landed there.
+ *
+ * A candidate can win more than one collapse clash at once — a substitution of
+ * one kept row and an exact copy of another. It then takes the first slot and
+ * vacates the rest, because a row left standing beside the copy that replaced
+ * it returns the same text twice and costs a distinct row its slot. The scan
+ * only stops at the first clash with grouping off; with grouping on it walks
+ * the whole window, so every clash is visible here.
  */
 export function dedupeWindowGrouped(
   ranked: Memory[],
@@ -265,7 +272,18 @@ export function dedupeWindowGrouped(
     // a slot on a duplicate while a distinct row waits outside — the exact loss
     // this pass exists to prevent. A collapse therefore outranks a group.
     let addition = -1; // first clash that names something new
-    let collapse = -1; // a clash that is a copy or a correction
+    let collapse = -1; // FIRST clash that is a copy or a correction
+    // Every collapse clash the candidate wins, not just the first. A row can
+    // beat two kept rows in one pass and the two classes differ: it may be a
+    // substitution of one and an exact copy of another. Taking only the first
+    // slot leaves the copy it beat standing beside it, so the window returns
+    // the same text twice and a distinct row outside never arrives.
+    const beaten: number[] = [];
+    // Collapse slots emptied because the candidate took their row's meaning.
+    const vacated = new Set<number>();
+    // A kept row the candidate loses to. One loss is enough to keep the
+    // candidate out: the newest copy is the one that rides.
+    let outranked = false;
     for (const pos of kept.keys()) {
       const k = kept[pos]!;
       if (
@@ -284,8 +302,13 @@ export function dedupeWindowGrouped(
         if (addition < 0) addition = pos;
         continue;
       }
-      collapse = pos;
-      break;
+      if (!groupAdditions) {
+        collapse = pos;
+        break;
+      }
+      if (collapse < 0) collapse = pos;
+      if (ranked[k]!.ts >= ranked[i]!.ts) outranked = true;
+      else beaten.push(pos);
     }
     if (
       collapse < 0 &&
@@ -295,10 +318,24 @@ export function dedupeWindowGrouped(
     ) {
       kept.push(i);
     } else if (collapse >= 0) {
-      if (ranked[i]!.ts > ranked[kept[collapse]!]!.ts) kept[collapse] = i;
+      // Decided before any slot changes. A candidate that loses to a newer kept
+      // row does not ride, so it must not overwrite the older row it also
+      // beat: that would drop a row the candidate never outranked.
+      // A winner takes the FIRST clashing slot, keeping its rank, and every
+      // other slot it won is removed so the scan refills it.
+      const rides = !outranked && ranked[i]!.ts > ranked[kept[collapse]!]!.ts;
+      if (rides) {
+        kept[collapse] = i;
+        for (const pos of beaten) {
+          if (pos !== collapse) vacated.add(pos);
+        }
+      }
     } else if (addition >= 0) {
       if (ranked[i]!.ts > ranked[kept[addition]!]!.ts) kept[addition] = i;
     } else kept.push(i);
+    // Removed after the branch: `collapse` and `beaten` are positions inside
+    // `kept`, and splicing mid-scan would move them.
+    for (const pos of [...vacated].sort((a, b) => b - a)) kept.splice(pos, 1);
   }
   const rows = kept.map((i) => ranked[i]!);
   // Families are recomputed from the window instead of accumulated during the
