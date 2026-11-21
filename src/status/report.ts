@@ -177,10 +177,25 @@ export function captureLines(c: CaptureHealth): string[] {
       // `capture_lag` completion receipt. A successful capture whose model
       // returned `[]` writes only the receipt, and is alive, not inert
       // ( F1).
-      if (!c.lastExecuted && c.rows === 0 && c.blocked === 0)
+      if (!c.lastExecuted && c.rows === 0 && c.blocked === 0) {
+        // A pass reached the model call but recorded no verdict, or an armed
+        // instance was disposed with no turn-end event observed. Render whichever
+        // line is newer: a stale start must not outrank a fresh dispose, nor the
+        // reverse. Neither line names the cause — a start alone establishes only
+        // that completion was unobserved.
+        if (c.lastStarted || c.lastMissed) {
+          if (c.lastStarted && (!c.lastMissed || c.lastStarted >= c.lastMissed))
+            return [
+              "  auto-capture: ARMED — a pass reached the model call but recorded no verdict; the turn-end event arrived and the pass did not complete.",
+            ];
+          return [
+            "  auto-capture: ARMED BUT NEVER FIRED — no turn-end event was observed before disposal; no pass could start.",
+          ];
+        }
         return [
           "  auto-capture: ARMED BUT NEVER FIRED — capture is on, no auto_capture_* or capture_lag lines in the last 30d",
         ];
+      }
       const fired = c.lastFired ?? c.lastExecuted;
       return [
         `  auto-capture: on, last fired ${fired ? ago(fired) : "now"}, ${c.rows} rows, ${c.blocked} refused`,

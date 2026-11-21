@@ -177,6 +177,21 @@ export interface CaptureHealth {
    * only this line, so the inert verdict must consult it ( F1).
    */
   lastExecuted: string | null;
+  /**
+   * Newest `auto_capture_start` receipt: a pass reached the model call. It is
+   * written only after every skip decision, so a deliberate skip never sets it.
+   * A start with no `capture_cost` means completion was unobserved — a different
+   * fact from a deliberate skip (`auto_capture_skipped`, no start line) and from
+   * a completed run (a `capture_lag` receipt).
+   */
+  lastStarted?: string | null;
+  /**
+   * Newest `auto_capture_dispose` flush: an armed instance was disposed with no
+   * turn-end event observed and no pass started. Predictive — built for the state
+   * the original report inferred, not one observed on a released host; an idle
+   * instance restarted between turns produces it too.
+   */
+  lastMissed?: string | null;
 }
 
 const CAPTURE_STATES: readonly CaptureHealthState[] = [
@@ -199,6 +214,8 @@ export function captureHealth(
   let blocked = 0;
   let lastFired: string | null = null;
   let lastExecuted: string | null = null;
+  let lastStarted: string | null = null;
+  let lastMissed: string | null = null;
   for (const line of lines) {
     const f = parseLine(line);
     if (!f) continue;
@@ -223,6 +240,20 @@ export function captureHealth(
         lastExecuted = ts;
       continue;
     }
+    if (ev === "auto_capture_start") {
+      // A pass began (the turn-end event reached the plugin). Tracked apart from
+      // lastFired: a start with no completion is a cut, not a verdict, so
+      // it must not make a never-completed capture look "fired and alive."
+      if (ts && ts >= cutoff && (!lastStarted || ts > lastStarted))
+        lastStarted = ts;
+      continue;
+    }
+    if (ev === "auto_capture_dispose") {
+      // The disposal flush: armed, disposed, never a turn-end event.
+      if (ts && ts >= cutoff && (!lastMissed || ts > lastMissed))
+        lastMissed = ts;
+      continue;
+    }
     if (!ev.startsWith("auto_capture_")) continue;
     if (ts && ts < cutoff) continue;
     if (ev.endsWith("promoted")) rows++;
@@ -234,5 +265,13 @@ export function captureHealth(
       blocked++;
     if (ts && (!lastFired || ts > lastFired)) lastFired = ts;
   }
-  return { state, rows, blocked, lastFired, lastExecuted };
+  return {
+    state,
+    rows,
+    blocked,
+    lastFired,
+    lastExecuted,
+    lastStarted,
+    lastMissed,
+  };
 }
