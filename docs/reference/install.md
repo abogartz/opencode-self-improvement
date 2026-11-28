@@ -4,6 +4,9 @@ The README leads with `opencode plugin add`, then a restart, then an optional
 `/repo-init`. This file holds the other ways to install, how updates are
 resolved, and what to point at when you are working on the plugin itself.
 
+For the experimental oh-my-pi tools/context adapter, use the separate
+[oh-my-pi installation guide](oh-my-pi.md).
+
 ## Plugin commands
 
 ```sh

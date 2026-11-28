@@ -158,6 +158,19 @@ const server = Bun.serve({
     if (url.pathname.endsWith("/chat/completions") && req.method === "POST") {
       const body = await req.json();
       appendFile(logFile, JSON.stringify(body) + "\n", () => {});
+      if (
+        process.env.FAKE_REQUIRE_USER_MESSAGE === "1" &&
+        !body.messages?.some((m: { role: string }) => m.role === "user")
+      )
+        return Response.json(
+          {
+            error: {
+              message: "No user query found in messages.",
+              type: "invalid_request_error",
+            },
+          },
+          { status: 400 },
+        );
       const { step, served } = stepFor(body);
       console.log(`served ${served}`);
       const base = {

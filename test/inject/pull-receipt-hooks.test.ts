@@ -201,6 +201,7 @@ describe("Feature: a pull is credited by the request that carries it", () => {
     const lost = ev(readEvidenceLog(), "pull_undelivered");
     expect(lost).toHaveLength(1);
     expect(lost[0]).toMatchObject({
+      harness: "opencode",
       tool: "read",
       rows: "1",
       stage: "request",
@@ -209,7 +210,16 @@ describe("Feature: a pull is credited by the request that carries it", () => {
     // row or the tool output. (tool_result's own output summary is a
     // separate, pre-existing evidence line and not this contract.)
     expect(Object.keys(lost[0]).sort()).toEqual(
-      ["ev", "repo", "repoPath", "rows", "stage", "tool", "ts"].sort(),
+      [
+        "ev",
+        "harness",
+        "repo",
+        "repoPath",
+        "rows",
+        "stage",
+        "tool",
+        "ts",
+      ].sort(),
     );
     const evidence = [...lost, ...ev(readEvidenceLog(), "pull_unconfirmed")]
       .map((line) => JSON.stringify(line))

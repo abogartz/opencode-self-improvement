@@ -1,3 +1,4 @@
+import { observedToolResults } from "../../src/adapters/opencode/delivery.ts";
 // A pull is credited when the request carries it, not when it is placed.
 // The receipt book is pure state, so its contract is pinned here without a
 // host: which rows a request's tool-result proves, and what is reported
@@ -6,7 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { formatMemory } from "../../src/inject/format.ts";
 import { PULL_HEADER } from "../../src/inject/pull.ts";
 import {
-  createPullReceipts,
+  createPullReceipts as createReceiptBook,
   HELD_PULL_TTL_MS,
   type HeldPull,
 } from "../../src/inject/pull-receipts.ts";
@@ -432,3 +433,13 @@ describe("Feature: retention is bounded and stale placements are never credited"
     ).toEqual([]);
   });
 });
+
+function createPullReceipts(options?: Parameters<typeof createReceiptBook>[0]) {
+  const book = createReceiptBook(options);
+  return {
+    ...book,
+    settle(sid: string | undefined, messages: unknown, now?: number) {
+      return book.settle(sid, observedToolResults(messages), now);
+    },
+  };
+}

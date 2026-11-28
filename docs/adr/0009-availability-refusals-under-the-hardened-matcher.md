@@ -1,7 +1,7 @@
 # ADR 0009 — Availability verdicts refuse capture candidates, under the hardened matcher
 
 Status: accepted (2026-11). Supersedes [ADR 0008](0008-availability-tags-not-refusals.md).
-Code: `src/capture/available.ts` (the predicate), applied in `src/capture/runtime.ts` (the refusal).
+Code: `src/capture/available.ts` (the predicate), applied in `src/runtime/capture.ts` (the refusal).
 
 ## Decision
 

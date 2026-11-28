@@ -13,14 +13,12 @@ export const register: ToolRegister = (editor, deps) => {
     ownerlessWriter,
     refuseOwnerlessWrite,
     gateContext,
-    direct,
   } = deps;
   editor.add(
     validated(ImportArgs, {
       name: "memory_import",
       description:
         'Import memories from a JSONL export (see memory_export). Every row goes through the same 4-gate write pipeline as memory_remember (tagged `import`, original tags preserved), so duplicates collapse and ungrounded rows are blocked exactly as usual — those are normal tallied outcomes, not errors. Malformed lines are skipped and counted. `file` must be inside the memory root — copy the export there first. Frontier policy: status:"open" exempts a row from ref grounding, so it requires a memory_export header and cannot claim global scope; imported repo stamps are kept only when they match the importing session\'s repo, otherwise the importing repo is stamped. A stamped open row is downgraded when there is no current repo scope to verify it. Imported content is unverified by construction: injected rows surface a `[via import]` provenance marker.',
-      options: direct,
       async execute(args, context): Promise<{ content: string }> {
         const { sid } = toolIds(context);
         // Resolve before touching the file: every imported row is re-stamped

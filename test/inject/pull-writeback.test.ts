@@ -2,7 +2,7 @@
 // versions, and only ONE of the fields it exposes actually reaches the model —
 // measured in e2e/pull-delivery.test.ts, pinned mechanically here.
 import { describe, expect, test } from "bun:test";
-import { writePullIntoResult } from "../../src/inject/pull.ts";
+import { writePullIntoResult } from "../../src/adapters/opencode/delivery.ts";
 
 const BLOCK = "\n## Related durable memory — remembered facts\n- row";
 

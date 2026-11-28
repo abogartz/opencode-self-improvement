@@ -1,3 +1,4 @@
+import type { ObservedToolResult } from "../host/lifecycle.ts";
 // Pull receipts track complete memory rows in a tool result observed by
 // this plugin’s session.context hook. Later request transformations are opaque.
 import type { Memory } from "../store/model/memory.ts";
@@ -49,43 +50,21 @@ export const MAX_HELD_PULLS = 256;
  */
 export const HELD_PULL_TTL_MS = 30 * 60_000;
 
-function resultText(result: unknown): string | undefined {
-  if (typeof result === "string") return result;
-  if (!result || typeof result !== "object") return undefined;
-  const r = result as { type?: unknown; value?: unknown };
-  if ((r.type === "text" || r.type === "error") && typeof r.value === "string")
-    return r.value;
-  if (r.type === "content" && Array.isArray(r.value)) {
-    return r.value
-      .map((p) =>
-        p?.type === "text" && typeof p.text === "string" ? p.text : "",
-      )
-      .filter(Boolean)
-      .join("\n");
-  }
-  return undefined;
-}
-
 // Each copy must independently prove its rows. Replayed copies cannot combine
 // their line counts to identify otherwise ambiguous rows.
 function observedRows(
-  messages: unknown,
+  results: readonly ObservedToolResult[],
   pending: Map<string, HeldPull>,
 ): Map<HeldPull, Set<Memory>> {
   const observed = new Map<HeldPull, Set<Memory>>();
-  if (!Array.isArray(messages)) return observed;
-  for (const msg of messages) {
-    if (msg?.role !== "tool" || !Array.isArray(msg.content)) continue;
-    for (const part of msg.content) {
-      if (part?.type !== "tool-result") continue;
-      const entry = pending.get(part.id);
-      if (!entry || entry.tool !== part.name) continue;
-      const rows = survivingRows(entry, resultText(part.result) ?? "");
-      if (!rows) continue;
-      const kept = observed.get(entry) ?? new Set<Memory>();
-      for (const row of rows) kept.add(row);
-      observed.set(entry, kept);
-    }
+  for (const result of results) {
+    const entry = pending.get(result.callID);
+    if (!entry || entry.tool !== result.tool) continue;
+    const rows = survivingRows(entry, result.text);
+    if (!rows) continue;
+    const kept = observed.get(entry) ?? new Set<Memory>();
+    for (const row of rows) kept.add(row);
+    observed.set(entry, kept);
   }
   return observed;
 }
@@ -138,7 +117,7 @@ export interface PullReceipts {
    */
   settle(
     sid: string | undefined,
-    messages: unknown,
+    messages: readonly ObservedToolResult[],
     now?: number,
   ): { credits: PullCredit[]; losses: PullLoss[] };
   /** Placements still waiting for a request. */

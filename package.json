@@ -5,7 +5,14 @@
   "main": "index.ts",
   "exports": {
     ".": "./index.ts",
-    "./tui": "./src/tui/panel.tsx"
+    "./tui": "./src/adapters/opencode/tui/panel.tsx",
+    "./oh-my-pi": "./src/adapters/oh-my-pi/extension.ts"
+  },
+  "omp": {
+    "description": "Shared memory, context, native commands, and automatic turn-end and compaction capture.",
+    "extensions": [
+      "./src/adapters/oh-my-pi/extension.ts"
+    ]
   },
   "module": "index.ts",
   "type": "module",
@@ -38,10 +45,13 @@
     "vendor",
     "docs",
     "README.md",
+    "README.oh-my-pi.md",
     "LICENSE"
   ],
   "devDependencies": {
     "@biomejs/biome": "2.6.2",
+    "@oh-my-pi/pi-ai": "19.2.1",
+    "@oh-my-pi/pi-catalog": "19.2.1",
     "@opencode/plugin": "2.0.32",
     "@opentui/core": "0.6.6",
     "@opentui/solid": "0.6.6",
@@ -59,6 +69,8 @@
   },
   "scripts": {
     "test": "bun test ./test/ --parallel=4 --timeout=20000",
+    "test:simulator": "bun test ./test/simulator/ ./test/runtime/ --timeout=20000",
+    "test:oh-my-pi": "bun x tsc --noEmit -p integration/oh-my-pi/tsconfig.json && bun test ./integration/oh-my-pi/ --timeout=240000",
     "test:e2e": "bun test ./e2e/ --parallel=4 --timeout 240000",
     "gate": "bun scripts/merge-gate.ts",
     "gate:hooks": "git config core.hooksPath .githooks",

@@ -18,13 +18,12 @@ import { isActive, isInjectable } from "../store/model/predicates.ts";
 import { MergeReviewArgs, validated } from "./schema.ts";
 
 export const register: ToolRegister = (editor, deps) => {
-  const { toolIds, bindSessionIdentity, direct } = deps;
+  const { toolIds, bindSessionIdentity } = deps;
   editor.add(
     validated(MergeReviewArgs, {
       name: "memory_merge_review",
       description:
         "Resolve an open merge/review gate non-destructively: mark the loser as superseded_by the survivor, and clear any supersession the survivor itself carries so the canonical row stays recallable. Both rows stay active data (the loser is recoverable via memory_undo); nothing is deleted. A session may merge exactly the rows it may read: global rows are mergeable from anywhere, but a row belonging to another repository is refused in either seat. Refuses before writing when the reason or the survivor id is missing, either id names a missing or blocklisted row, the loser is already superseded or is the survivor itself, either seat names a foreign repository's row, or the survivor's supersession was written by a row other than this review's loser (a later update's marker is never erased). A consolidation command also refuses before writing if its expected digest is missing or no longer matches the store. Later lock or I/O failures can leave partial changes; the reply names the completed retirement and failure.",
-      options: direct,
       async execute(args, context): Promise<{ content: string }> {
         const { sid } = toolIds(context);
         // Identity before authorization: the entry binding is only

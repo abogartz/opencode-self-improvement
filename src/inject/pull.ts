@@ -29,50 +29,6 @@ export interface PullOutput {
   output?: unknown;
 }
 
-// Put the pull onto the host's tool result so the model actually reads it.
-// WHICH field the host forwards is measured, not assumed. On opencode v2.3.0
-// (probed through e2e/support/harness.ts against the real host) `result.content`
-// is an ARRAY of `{type:"text",text}` parts and mutating a text part changes the
-// next request; mutating `result.output` — the file-attachment object
-// `{type,uri,name,content,encoding,mime}` — does not. Older hosts passed a plain
-// string in `content`, which is the shape this function was originally written
-// against, and a string `output` is covered too.
-//
-// Returns true only when the bytes were placed. A pull that found nowhere to
-// write showed the model nothing. Placement is still not delivery: a later
-// plugin's hook can trim the result, so the caller only HOLDS the credit and
-// the next request settles it (src/inject/pull-receipts.ts).
-export function writePullIntoResult(
-  result: unknown,
-  before: string,
-  after: string,
-): boolean {
-  if (!result || typeof result !== "object") return false;
-  // Compare the two local strings to isolate the suffix this hook appended.
-  if (!after.startsWith(before)) return false;
-  const block = after.slice(before.length);
-  if (!block) return false;
-  const r = result as { content?: unknown };
-  if (typeof r.content === "string") {
-    r.content += block;
-    return true;
-  }
-  if (Array.isArray(r.content)) {
-    // Append to the LAST text part: the pull is commentary on the output, so it
-    // belongs after it, and a result can carry several parts.
-    for (let i = r.content.length - 1; i >= 0; i--) {
-      const part = r.content[i] as { text?: unknown } | undefined;
-      if (part && typeof part === "object" && typeof part.text === "string") {
-        part.text += block;
-        return true;
-      }
-    }
-    r.content.push({ type: "text", text: block });
-    return true;
-  }
-  return false;
-}
-
 // What a pull is allowed to search. Every field exists because it was measured
 // before being changed (bench/runners/pull-precision.ts), not because it seemed
 // reasonable: a pull bolts text onto a tool result the model did not ask for, so
