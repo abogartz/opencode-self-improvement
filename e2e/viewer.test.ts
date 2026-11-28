@@ -18,11 +18,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { REPO } from "./support/harness.ts";
 
-const guests: { root: string; stop: () => void }[] = [];
+const guests: { root: string; stop: () => Promise<void> }[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   for (const g of guests.splice(0)) {
-    g.stop();
+    await g.stop();
     rmSync(g.root, { recursive: true, force: true });
   }
 });
@@ -34,7 +34,7 @@ interface Viewer {
   root: string;
   memoryDir: string;
   port: number;
-  stop: () => void;
+  stop: () => Promise<void>;
 }
 
 /** Boot the real viewer against an isolated store; resolve its chosen port. */
@@ -70,7 +70,15 @@ async function startViewer(storeLines: string): Promise<Viewer> {
     if (m) port = Number(m[1]);
   }
   if (!port) throw new Error(`viewer did not come up: ${out}`);
-  return { root, memoryDir, port, stop: () => child.kill(9) };
+  return {
+    root,
+    memoryDir,
+    port,
+    stop: async () => {
+      child.kill(9);
+      await child.exited;
+    },
+  };
 }
 
 interface Resp {

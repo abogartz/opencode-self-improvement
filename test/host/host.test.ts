@@ -1,14 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
   captureSessionID,
-  foldUsage,
-  forgetUsage,
-  sessionDirectoryFromMessages,
-  sessionDirectoryFromRow,
   sessionIdentityEvent,
   sessionUsageEvent,
+} from "../../src/adapters/opencode/observations.ts";
+import { foldUsage, forgetUsage } from "../../src/status/usage.ts";
+import {
   toolIdentity,
-} from "../../src/identity/host-events.ts";
+  sessionDirectoryFromMessages,
+  sessionDirectoryFromRow,
+} from "../../src/adapters/opencode/identity.ts";
 
 describe("host compatibility adapters", () => {
   test("tool context uses id, with missing fields left to the caller's synchronous fallback", () => {

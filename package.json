@@ -5,7 +5,7 @@
   "main": "index.ts",
   "exports": {
     ".": "./index.ts",
-    "./tui": "./src/tui/panel.tsx"
+    "./tui": "./src/adapters/opencode/tui/panel.tsx"
   },
   "module": "index.ts",
   "type": "module",
@@ -74,7 +74,8 @@
     "format": "biome format --write",
     "format:check": "biome format",
     "lint": "biome lint && bun run format:check",
-    "lint:comments": "bun scripts/comment-lint.ts"
+    "lint:comments": "bun scripts/comment-lint.ts",
+    "test:simulator": "bun test ./test/simulator/ ./test/runtime/ --timeout=20000"
   },
   "dependencies": {
     "@babel/parser": "7.29.9",

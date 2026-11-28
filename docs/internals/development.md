@@ -19,6 +19,20 @@ rule stay in the README.
 
 The test scripts run files across at most four worker processes with Bun's file isolation. To reproduce an order-dependent failure the way it would appear in one shared process, run `bun test ./test/` or `bun test ./e2e/ --timeout 240000` directly.
 
+## Host interface and reference harness
+
+The [host contract](host-contract.md) specifies the ports, semantic obligations,
+capabilities and shared project/global ownership rules. `src/runtime/` contains
+the shared setup, lifecycle and capture policy; `test/simulator/` implements the
+same interface with controlled failures and event ordering. Run
+`bun run test:simulator` without installing another harness or using a model
+service. These tests also run in the ordinary unit suite.
+
+The production OpenCode adapter lives in `src/adapters/opencode/`, including
+its terminal UI. Its plugin supplies the same host interface as the reference
+implementation. Adapter conformance tests run the real engine with both hosts;
+the package keeps its existing OpenCode entry points.
+
 ## What the smoke suite boots
 
 Both smoke jobs run the same suite and print the exact OpenCode CLI version.
@@ -31,4 +45,4 @@ supported host and announce how long the existing coverage will remain.
 
 ## The published surface is `package.json`
 
-`exports` is the only import surface other code can reach (`.` → `index.ts`, `./tui` → `src/tui/panel.tsx`); `files` is the packaging list. `files` covers `src/`, so anything reachable from an `exports` target ships, but a new top-level file or directory — or anything the plugin reads at runtime outside those paths — must be added to `files` or it works from the checkout and vanishes from the npm artifact. The packed-artifact load in `e2e/` turns that miss red.
+`exports` is the only import surface other code can reach (`.` → `index.ts`, `./tui` → `src/adapters/opencode/tui/panel.tsx`); `files` is the packaging list. `files` covers `src/`, so anything reachable from an `exports` target ships, but a new top-level file or directory — or anything the plugin reads at runtime outside those paths — must be added to `files` or it works from the checkout and vanishes from the npm artifact. The packed-artifact load in `e2e/` turns that miss red.

@@ -9,13 +9,12 @@ import { listSnapshots, restoreSnapshot } from "../store/undo.ts";
 import { basename } from "node:path";
 
 export const register: ToolRegister = (editor, deps) => {
-  const { toolIds, bindSessionIdentity, direct } = deps;
+  const { toolIds, bindSessionIdentity } = deps;
   editor.add(
     validated(UndoArgs, {
       name: "memory_undo",
       description:
         "List memory snapshots, or restore one (rollback). Only snapshots inside this store's snapshots directory are accepted: pass a bare name from the list or its full path. Non-standard files in snapshots/ are not listed or restorable. SAFE BY DEFAULT: restore refuses if the current file has rows added or edited since the snapshot, and audited human/tool deletions stay deleted. Re-run with merge=true to restore AND keep divergent rows, or force=true for an explicit exact rollback. Blocklisted rows remain inactive in every mode. Rejection is absolute: no mode resurrects a row whose content a human rejected — every mode omits such rows and reports them; recovery is human-only (lift the tombstone, then restore). Rows belonging to other repositories are never restored, rewound, or dropped in any mode — their lines survive verbatim, though a restore may place them later in the shared file. Global rows are visible to every repository, so they are in every repository's rollback scope.",
-      options: direct,
       async execute(args, context): Promise<{ content: string }> {
         if (args.snapshot) {
           const mode = args.force ? "force" : args.merge ? "merge" : "check";

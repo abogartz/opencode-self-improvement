@@ -12,24 +12,31 @@ import { watch, type FSWatcher } from "node:fs";
 import { For, Show, createSignal } from "solid-js";
 import { Plugin, usePlugin } from "@opencode/plugin/tui";
 import type { PanelInput } from "@opencode/plugin/tui/context";
-import { evidenceDir, memoryRoot } from "../core/config/paths.ts";
-import { fmtBytes, fmtMs } from "../status/format.ts";
-import { cacheHealth, cacheRate, type CacheHealth } from "../status/format.ts";
-import { ledgerIsYoung } from "../status/metrics.ts";
-import { type BlockedRow, type StatusPayload } from "../status/payload.ts";
+import { evidenceDir, memoryRoot } from "../../../core/config/paths.ts";
+import { fmtBytes, fmtMs } from "../../../status/format.ts";
+import {
+  cacheHealth,
+  cacheRate,
+  type CacheHealth,
+} from "../../../status/format.ts";
+import { ledgerIsYoung } from "../../../status/metrics.ts";
+import {
+  type BlockedRow,
+  type StatusPayload,
+} from "../../../status/payload.ts";
 import {
   attributionLines,
   cacheLines,
   contextLines,
   evidenceWriteLines,
   windowLines,
-} from "../status/report.ts";
+} from "../../../status/report.ts";
 import {
   blockedReaderFor,
   blockedRecent,
   readStatus,
   statusDir,
-} from "../status/write.ts";
+} from "../../../status/write.ts";
 
 const PANEL = "self-improvement.memory";
 const POLL_MS = 5000;

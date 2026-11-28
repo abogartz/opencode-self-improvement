@@ -1,3 +1,4 @@
+import { decodeTranscript } from "../../src/adapters/opencode/transcript.ts";
 // Contract (medium severity): auto-capture redacts
 // BEFORE it crops. captureSession used to mine `transcript.slice(-8000)` and
 // let buildCapturePrompt scrub the WINDOW — but a credential straddling the
@@ -10,7 +11,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { flattenTranscript } from "../../src/capture/transcript.ts";
+import { flattenTranscript } from "../../src/runtime/transcript.ts";
 import { resetState } from "../../src/core/state.ts";
 import {
   resetSessionScopes,
@@ -113,7 +114,7 @@ test("a PEM body straddling the crop boundary never reaches the capture model", 
         "\n-----END PRIVATE KEY-----\nThat was the pasted rotation key. The deploy ran twice afterwards.",
     },
   ];
-  const flat = flattenTranscript(messages);
+  const flat = flattenTranscript(decodeTranscript(messages));
   const start = cropStart(flat);
   // The probe only counts if BEGIN fell OUT of the window and the body did not.
   expect(start).toBeGreaterThan(flat.indexOf("-----BEGIN PRIVATE KEY") + 10);
@@ -141,7 +142,7 @@ test("a token whose prefix falls out of the crop is still redacted", async () =>
         " End of the debug transcript.",
     },
   ];
-  const flat = flattenTranscript(messages);
+  const flat = flattenTranscript(decodeTranscript(messages));
   const start = cropStart(flat);
   const tokStart = flat.indexOf("ghp_");
   // Crop starts INSIDE the token: prefix gone (no prefix match possible),

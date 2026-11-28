@@ -9,12 +9,11 @@ import { flattenMemoryText } from "../store/sanitize.ts";
 import { EmptyArgs, validated } from "./schema.ts";
 
 export const register: ToolRegister = (editor, deps) => {
-  const { toolIds, direct } = deps;
+  const { toolIds } = deps;
   editor.add(
     validated(EmptyArgs, {
       name: "memory_list",
       description: "List memory scopes and types for discovery.",
-      options: direct,
       async execute(_args, context): Promise<{ content: string }> {
         const { sid } = toolIds(context);
         const reader = readerFromSid(sid);

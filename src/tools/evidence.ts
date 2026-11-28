@@ -9,13 +9,12 @@ import { evidenceVisibleTo, readerFromSid } from "../store/model/visibility.ts";
 import { EvidenceArgs, validated } from "./schema.ts";
 
 export const register: ToolRegister = (editor, deps) => {
-  const { toolIds, direct } = deps;
+  const { toolIds } = deps;
   editor.add(
     validated(EvidenceArgs, {
       name: "memory_evidence",
       description:
         "Read captured evidence (data only) for a date, optionally filtered by event.",
-      options: direct,
       async execute(args, context): Promise<{ content: string }> {
         const { sid } = toolIds(context);
         const reader = readerFromSid(sid);

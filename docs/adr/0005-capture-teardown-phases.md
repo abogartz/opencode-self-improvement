@@ -1,6 +1,6 @@
 # ADR 0005 — Two-phase teardown for capture passes
 
-Status: accepted (2026-11). Code: `src/capture/runtime.ts` (`PassPhase`, `DRAIN_LIMIT_MS`).
+Status: accepted (2026-11). Code: `src/runtime/capture.ts` (`PassPhase`, `DRAIN_LIMIT_MS`).
 
 ## Decision
 

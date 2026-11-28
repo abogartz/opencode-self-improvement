@@ -1,5 +1,5 @@
 // Structural subset of the OpenCode host used by setup and hook wiring.
-interface ToolDef {
+export interface OpenCodeTool {
   name: string;
   description: string;
   input: Record<string, unknown>;
@@ -7,7 +7,7 @@ interface ToolDef {
   execute: (args: any, context: any) => Promise<{ content: string }>;
 }
 interface ToolEditorLike {
-  add: (tool: ToolDef) => void;
+  add: (tool: OpenCodeTool) => void;
 }
 interface HookReg {
   dispose?: () => Promise<void> | void;
@@ -18,13 +18,13 @@ export interface PluginCtx {
   tool?: {
     transform: (cb: (editor: ToolEditorLike) => void) => Promise<unknown>;
     hook: (
-      name: string,
+      name: "execute.before" | "execute.after",
       cb: (event: any) => Promise<void> | void,
     ) => Promise<HookReg | void>;
   };
   session?: {
     hook: (
-      name: string,
+      name: "context" | "prompt" | "compaction",
       cb: (event: any) => Promise<void> | void,
     ) => Promise<HookReg | void>;
     context?: (input: { sessionID: string }) => Promise<unknown>;
@@ -33,7 +33,19 @@ export interface PluginCtx {
   event?: {
     subscribe: (o?: { signal?: AbortSignal }) => AsyncIterable<unknown>;
   };
+  model?: {
+    default?:
+      | {
+          get?: () => { providerID: string; modelID: string } | undefined;
+        }
+      | ((input?: { location?: { directory?: string } }) => Promise<{
+          data: { providerID: string; modelID: string } | null;
+        }>);
+  };
   generate?: {
-    text: (input: unknown) => Promise<{ text?: string } | string>;
+    text: (
+      input: { prompt: string; model: { providerID: string; id: string } },
+      options?: { signal?: AbortSignal },
+    ) => Promise<{ text?: string } | string>;
   };
 }

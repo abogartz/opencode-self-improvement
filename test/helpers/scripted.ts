@@ -22,7 +22,7 @@ import { rememberSessionDir } from "../../src/identity/repokey.ts";
 import { resetState, setCurrent } from "../../src/core/state.ts";
 import { startViewer, type ViewerServer } from "../../src/viewer/server.ts";
 import { loadPlugin, type LoadedPlugin } from "../harness.ts";
-import { removeStore } from "../helpers/remove-store.ts";
+import { removeStore } from "./remove-store.ts";
 
 export interface StoreRow {
   ts: string;

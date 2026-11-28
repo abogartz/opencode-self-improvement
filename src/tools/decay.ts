@@ -10,13 +10,12 @@ import { flattenMemoryText } from "../store/sanitize.ts";
 import { DecayArgs, validated } from "./schema.ts";
 
 export const register: ToolRegister = (editor, deps) => {
-  const { toolIds, direct } = deps;
+  const { toolIds } = deps;
   editor.add(
     validated(DecayArgs, {
       name: "memory_decay",
       description:
         "Retire stale open threads (status=open older than olderThanDays) by superseding them — never deleting; rows stay recoverable via memory_undo. DRY RUN BY DEFAULT: without an explicit dryRun=false this only LISTS what would retire and mutates nothing (fail-closed). A real run snapshots every affected file before the first mutation.",
-      options: direct,
       async execute(args, context): Promise<{ content: string }> {
         const { sid } = toolIds(context);
         const evidenceContext = captureEvidenceContext(sid);

@@ -256,6 +256,7 @@ export async function turn(
   guest: Guest,
   prompt: string,
   timeoutMs = 180_000,
+  server?: string,
 ): Promise<Run> {
   await fake.reset(); // per-run episode: clean counters + clean request log
   // Native spawn, not node:child_process: on Windows the resolved CLI is
@@ -266,7 +267,7 @@ export async function turn(
     [
       resolveOpencode(),
       "run",
-      "--standalone",
+      ...(server ? ["--server", server] : ["--standalone"]),
       "--format",
       "json",
       "-m",
@@ -417,6 +418,12 @@ function readdirTgz(dir: string): string {
  * bug = "react/jsx-*".
  */
 export function tuiJsxSource(installedDir: string): string {
+  const manifest = JSON.parse(
+    readFileSync(join(installedDir, "package.json"), "utf8"),
+  );
+  const entry = manifest.exports?.["./tui"];
+  if (typeof entry !== "string")
+    throw new Error("packed package has no TUI export");
   rmSync(join(installedDir, "tsconfig.json"), { force: true });
   const scratch = mkdtempSync(join(tmpdir(), "psi-e2e-tui-"));
   const out = join(scratch, "out.js");
@@ -424,7 +431,7 @@ export function tuiJsxSource(installedDir: string): string {
     [
       "bun",
       "build",
-      join(installedDir, "src", "tui", "panel.tsx"),
+      join(installedDir, entry),
       "--target=bun",
       "--packages=external",
       "--outfile",

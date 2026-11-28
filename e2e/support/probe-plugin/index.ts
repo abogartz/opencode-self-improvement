@@ -15,7 +15,7 @@ const PROBE_PROMPT = "probe receipt";
 
 /**
  * The subset of the host context this probe touches, declared locally on
- * purpose. Importing the SDK's (or src/core/host.ts's) context type would let
+ * purpose. Importing the SDK's or the adapter's context type would let
  * a DECLARED shape hide the runtime shape the probe exists to observe, and
  * would tie a standalone package to the repo it watches from outside.
  */

@@ -81,6 +81,7 @@ import {
   turn,
 } from "./support/harness.ts";
 import { arrivedLostBetween } from "./support/arrived-lost.ts";
+import { startServer } from "./support/server.ts";
 
 let fake: Fake;
 const guests: Guest[] = [];
@@ -256,6 +257,34 @@ const startRate = (test: string, started: number, arrivedLost: number) =>
   `[capture-start] ${test}: pass started on attempt ${started}, ${arrivedLost} arrived-lost (discard=none arrival, no pass, no skip)`;
 
 describe("auto-capture on the real host", () => {
+  test("cooperative server shutdown preserves an answered capture through the write gate", async () => {
+    const g = gitGuest({ autoCapture: true, captureModel: "fake/scripted" });
+    scriptCaptureTurn(g);
+    const server = await startServer(g);
+    try {
+      const run = await turn(fake, g, PROMPT, 60_000, server.url);
+      expect(run.exit, `${run.stderr}\n${JSON.stringify(run.errors())}`).toBe(
+        0,
+      );
+      let ev: string[] = [];
+      for (let i = 0; i < 40; i++) {
+        ev = evidenceLines(g);
+        if (withEv(ev, "capture_cost").length) break;
+        await Bun.sleep(100);
+      }
+      expect(withEv(ev, "capture_cost")).toHaveLength(1);
+      await server.stop();
+      const rows = storeRows(g).filter((l) => l.includes("auto-capture"));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toContain(CANDIDATE.content);
+      expect(withEv(evidenceLines(g), "capture_lag").at(-1)).toContain(
+        "outcome=candidates",
+      );
+    } finally {
+      await server.stop();
+    }
+  }, 120_000);
+
   test("a real turn fires a real capture pass", async () => {
     const g = gitGuest({ autoCapture: true, captureModel: "fake/scripted" });
     scriptCaptureTurn(g);
@@ -298,7 +327,10 @@ describe("auto-capture on the real host", () => {
       await Bun.sleep(100);
     }
     const ev = evidenceLines(g);
-    expect(rows.length).toBe(1);
+    expect(
+      rows.length,
+      `capture did not persist exactly one row; final evidence:\n${ev.slice(-12).join("\n")}`,
+    ).toBe(1);
     // Byte-for-byte: a pass that stored a paraphrase would still be "one row".
     expect(rows[0]).toContain(CANDIDATE.content);
     // The pass ran to completion, not just to the store: the completion receipt is

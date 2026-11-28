@@ -15,6 +15,7 @@ import {
 } from "./payload.ts";
 import type { DroppedEvidenceWrites } from "../telemetry/record.ts";
 import { EVICT_MIN_RIDES } from "./store-summary.ts";
+import { harnessActivityLines, type HarnessActivity } from "./harness-stats.ts";
 
 function ago(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -126,7 +127,9 @@ export function windowLines(p: StatusPayload): string[] {
   const gen = m ? (m.output ?? 0) + (m.reasoning ?? 0) : 0;
   if (gen > 0) {
     out.push(
-      `  what it produced  ${fmtCount(gen)} completion tok — ${fmtCount(m?.output ?? 0)} answer + ${fmtCount(m?.reasoning ?? 0)} reasoning (provider-reported, session-wide)`,
+      m?.reasoning === undefined
+        ? `  what it produced  ${fmtCount(gen)} completion tok — reasoning split not reported (host-reported, session-wide)`
+        : `  what it produced  ${fmtCount(gen)} completion tok — ${fmtCount(m?.output ?? 0)} answer + ${fmtCount(m?.reasoning ?? 0)} reasoning (provider-reported, session-wide)`,
     );
   }
   const moved = p.stats?.invalidations ?? 0;
@@ -174,7 +177,7 @@ export function captureLines(c: CaptureHealth): string[] {
       ];
     case "no_capabilities":
       return [
-        "  auto-capture: no_capabilities — the host lacks event.subscribe/generate.text/session.context, so auto-capture is disabled",
+        "  auto-capture: no_capabilities — the host lacks turn-end events, model generation, or transcript access, so auto-capture is disabled",
       ];
     case "switch_mismatch":
       return [
@@ -264,9 +267,11 @@ export function evidenceWriteLines(
 
 /**
  * Plain-text rendering shared by the memory_status tool (and any other chat
- * client). Sections match the terminal /memory panel one-for-one.
+ * client). Adds cross-harness activity to the terminal panel's session sections.
  */
 export function renderMemoryReport(input: {
+  harnessActivity?: HarnessActivity;
+  captureHarness?: string;
   status: StatusPayload | null;
   store: StoreCounts;
   blocked: BlockedRow[];
@@ -408,12 +413,17 @@ export function renderMemoryReport(input: {
     out.push(
       "",
       "AUTO-CAPTURE — is it off, misconfigured, armed, or alive?",
+      ...(input.captureHarness
+        ? [`  configuration and activity for ${input.captureHarness}`]
+        : []),
       ...captureSection,
     );
   }
+  if (input.harnessActivity)
+    out.push("", ...harnessActivityLines(input.harnessActivity));
   out.push(
     "",
-    "Terminal (CLI/TUI) users: /memory opens this as a live panel; the footer shows a one-line badge.",
+    "Terminal (CLI/TUI) users: /memory opens the session panel; /memory-report includes the harness activity breakdown.",
   );
   return out.join("\n");
 }

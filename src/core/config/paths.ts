@@ -16,15 +16,6 @@ export function memoryRoot({ readOnly = false } = {}): string {
   return root;
 }
 
-// Where the plugin mirrors its own slash command (/repo-init). Written once at
-// load (write-if-missing), so no manual setup is needed after install.
-export function commandsDir(): string {
-  return (
-    process.env.OPENCODE_COMMANDS_DIR ||
-    join(homedir(), ".config", "opencode", "commands")
-  );
-}
-
 export function evidenceDir(): string {
   return join(memoryRoot(), "evidence");
 }
