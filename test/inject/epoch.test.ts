@@ -784,6 +784,36 @@ describe("epoch freeze (cache-safe injection)", () => {
     );
   });
 
+  test("compaction ends a held correction and delivers the current memory", async () => {
+    const original =
+      "The widget deployment uses the blue release lane for staging.";
+    const corrected =
+      "The widget deployment uses the green release lane for staging.";
+    const prompt = "Which widget deployment release lane is used for staging?";
+    const sid = "ses-held-compaction";
+    const id = seed("pattern", "deploy", original);
+    const loaded = await loadPlugin(liveRoot);
+    expect(await deliveredBlock(loaded, sid, prompt)).toContain(original);
+    const frozen = await deliveredSystem(loaded, sid);
+    await updateDeployment(loaded, sid, id, corrected);
+    expect(await deliveredSystem(loaded, sid)).toBe(frozen);
+
+    await loaded.sessionHooks["compaction"]!({ sessionID: sid });
+    expect(await deliveredSystem(loaded, sid)).not.toContain(original);
+    await deliveredBlock(loaded, sid, prompt);
+    const after = await deliveredSystem(loaded, sid);
+    expect(after).toContain(corrected);
+    expect(after).not.toContain(original);
+    expect(epochRecomputes(sid).map((e) => e.reason)).toEqual([
+      "first",
+      "first",
+    ]);
+
+    const fresh = "ses-held-compaction-fresh";
+    await deliveredBlock(loaded, fresh, prompt);
+    expect(after).toBe(await deliveredSystem(loaded, fresh));
+  });
+
   test.each([
     "foreign",
     "opt-out",
@@ -891,6 +921,8 @@ describe("epoch freeze (cache-safe injection)", () => {
     "undo",
     "hand-redacted predecessor",
     "blocked successor",
+    "decay",
+    "consolidation",
     "convergence",
   ] as const)(
     "%s can replace a held correction on the next request",
@@ -975,6 +1007,29 @@ describe("epoch freeze (cache-safe injection)", () => {
         case "blocked successor":
           await addBlock(successor, "withdraw corrected content");
           break;
+        case "decay":
+          expect(
+            await markSuperseded(successor, {
+              superseded_by: "decay",
+              reason: "decay",
+            }),
+          ).toBe(true);
+          break;
+        case "consolidation": {
+          const survivor = seed("pattern", "deploy", external, {
+            ts: "2026-10-04T09:00:00.000Z",
+          });
+          expect(
+            await markSuperseded(successor, {
+              superseded_by: survivor,
+              reason: "consolidate duplicate deployment guidance",
+              symbol: successor,
+              from: successor,
+              to: survivor,
+            }),
+          ).toBe(true);
+          break;
+        }
         case "convergence":
           mkdirSync(evidenceDir(), { recursive: true });
           appendFileSync(
@@ -990,7 +1045,7 @@ describe("epoch freeze (cache-safe injection)", () => {
       }
 
       const after = await deliveredSystem(loaded, sid);
-      if (mode === "blocked successor") {
+      if (mode === "blocked successor" || mode === "decay") {
         expect(after).not.toContain(corrected);
       } else if (
         mode === "hand-redacted predecessor" ||
@@ -1000,6 +1055,7 @@ describe("epoch freeze (cache-safe injection)", () => {
       } else {
         expect(after).toContain(external);
       }
+      if (mode === "consolidation") expect(after).not.toContain(corrected);
       if (mode === "convergence")
         expect(after).toContain("Convergence tracking:");
       expect(after).not.toContain(original);
