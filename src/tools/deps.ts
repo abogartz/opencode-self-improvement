@@ -5,9 +5,10 @@ import type { GateContext } from "../gate/gate.ts";
 import type { createInjectionEpochs } from "../inject/epochs.ts";
 import type { HitSource } from "../telemetry/ledger.ts";
 import type { Memory } from "../store/model/memory.ts";
+import type { MemoryToolEditor, ToolCallContext } from "../host/contracts.ts";
 
 export interface ToolDeps {
-  toolIds: (context?: unknown) => { sid: string; call: string };
+  toolIds: (context?: ToolCallContext) => { sid: string; call: string };
   bindSessionIdentity: (sid: string | undefined) => Promise<void>;
   ownerlessWriter: (sid: string | undefined) => string | null;
   refuseOwnerlessWrite: (
@@ -22,14 +23,8 @@ export interface ToolDeps {
     rows: Memory[],
     query: string,
   ) => Promise<void>;
-  direct: { readonly codemode: false };
 }
 
-// Structural twin of the host's tool editor; `any` mirrors the loose host
-// interop types index.ts already uses for the plugin surface.
-export interface ToolEditorLike {
-  // biome-ignore lint/suspicious/noExplicitAny: host interop boundary
-  add: (tool: any) => void;
-}
+export type ToolEditorLike = MemoryToolEditor;
 
 export type ToolRegister = (editor: ToolEditorLike, deps: ToolDeps) => void;

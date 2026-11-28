@@ -26,6 +26,7 @@ import {
 } from "../identity/repokey.ts";
 import { getCurrent } from "../core/state.ts";
 import { redactSecrets } from "../store/secrets.ts";
+import { currentHarness } from "./harness.ts";
 
 export type EvidenceEvent = string;
 
@@ -80,6 +81,7 @@ function scrubFields(fields: Record<string, unknown>): Record<string, unknown> {
 // Immutable operation attribution, captured before the caller's first await.
 // Null scope is significant: a named-unresolved session must stay private.
 export interface EvidenceContext {
+  readonly harness?: string;
   readonly sid: string;
   readonly call: string | undefined;
   readonly scope: Readonly<RepoScope> | null;
@@ -115,6 +117,7 @@ export function captureEvidenceContext(sessionID?: string): EvidenceContext {
   const named = typeof sid === "string" && sid !== "" && sid !== "?";
   const scope = named ? sessionScope(sid) : repoScope();
   return Object.freeze({
+    harness: currentHarness(),
     sid,
     call,
     scope: scope ? Object.freeze({ ...scope }) : null,
@@ -159,7 +162,8 @@ function buildEvidenceLine(
   sessionID?: string,
   context?: EvidenceContext,
 ): string {
-  const { sid, call, scope } = context ?? captureEvidenceContext(sessionID);
+  const { sid, call, scope, harness } =
+    context ?? captureEvidenceContext(sessionID);
   return formatLine({
     ev,
     ts: new Date().toISOString(),
@@ -168,11 +172,12 @@ function buildEvidenceLine(
     // metadata as requested, but never turn an explicit private owner global.
     ...(includeContext
       ? { sid, call }
-      : context && !scope && sid && sid !== "?"
+      : (context || sessionID !== undefined) && !scope && sid && sid !== "?"
         ? { sid }
         : {}),
     ...(scope ? { repo: scope.key, repoPath: scope.path } : {}),
     ...scrubFields(fields),
+    harness: harness ?? "unknown",
   });
 }
 

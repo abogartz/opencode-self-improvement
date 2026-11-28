@@ -640,7 +640,7 @@ describe("governed-path tripwire — no write path walks past the gate", () => {
     expect(gatesIn("src/tools/remember.ts")).toBeGreaterThanOrEqual(1);
     expect(gatesIn("src/tools/update.ts")).toBeGreaterThanOrEqual(1);
     expect(gatesIn("src/tools/import.ts")).toBeGreaterThanOrEqual(1);
-    expect(gatesIn("src/capture/runtime.ts")).toBeGreaterThanOrEqual(1);
+    expect(gatesIn("src/runtime/capture.ts")).toBeGreaterThanOrEqual(1);
     // /repo-init derived memories.
     expect(gatesIn("src/init/run.ts")).toBeGreaterThanOrEqual(1);
     // Import and capture are writers-by-proxy only: they hand candidates to the

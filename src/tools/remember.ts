@@ -15,14 +15,12 @@ export const register: ToolRegister = (editor, deps) => {
     refuseOwnerlessWrite,
     gateContext,
     sessions,
-    direct,
   } = deps;
   editor.add(
     validated(RememberArgs, {
       name: "memory_remember",
       description:
         "Store a memory after the 4-gate write pipeline validates it (canonical graph, stale refs, dupes). Blocked writes record evidence instead of persisting. Add `kw` — 3-5 aliases, synonyms, verb forms or the literal command a FUTURE session would search with — to make a row findable when the wording differs; keywords are indexed, never injected.",
-      options: direct,
       async execute(args, context): Promise<{ content: string }> {
         const { sid } = toolIds(context);
         const candidate: WriteCandidate = {

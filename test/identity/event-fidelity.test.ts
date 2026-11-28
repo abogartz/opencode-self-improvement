@@ -134,7 +134,9 @@ describe("host event fidelity", () => {
 
   test("inline event-name reads are declared or explicitly legacy", () => {
     const offenders: string[] = [];
-    for (const file of readdirSync(SRC).filter((n) => n.endsWith(".ts"))) {
+    for (const file of readdirSync(SRC, { recursive: true }).filter(
+      (n): n is string => typeof n === "string" && n.endsWith(".ts"),
+    )) {
       readFileSync(join(SRC, file), "utf8")
         .split("\n")
         .forEach((line, i) => {

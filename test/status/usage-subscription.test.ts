@@ -1,13 +1,14 @@
+import { createOpenCodeLifecycle } from "../../src/events.ts";
 import { expect, spyOn, test } from "bun:test";
 import { setImmediate } from "node:timers/promises";
 import { guarded } from "../../src/core/hooks.ts";
-import { registerHooks } from "../../src/events.ts";
+import { registerHooks } from "../../src/runtime/events.ts";
 import { createInjectionEpochs } from "../../src/inject/epochs.ts";
 import { PULL_SHIPPED } from "../../src/inject/pull.ts";
 import type { Measured } from "../../src/status/payload.ts";
 
 const WARNING =
-  "[opencode-self-improvement] usage subscription failed (ignored):";
+  "[opencode-self-improvement] lifecycle subscription or cleanup failed (ignored):";
 
 async function rejectedSubscription(abort: boolean) {
   const pull = Promise.withResolvers<IteratorResult<unknown>>();
@@ -16,13 +17,13 @@ async function rejectedSubscription(abort: boolean) {
   const warn = spyOn(console, "warn").mockImplementation(() => {});
   try {
     const controller = await registerHooks(
-      {
+      createOpenCodeLifecycle({
         event: {
           subscribe: () => ({
             [Symbol.asyncIterator]: () => ({ next: () => pull.promise }),
           }),
         },
-      },
+      }),
       {
         guarded,
         sessions: createInjectionEpochs({
@@ -43,7 +44,7 @@ async function rejectedSubscription(abort: boolean) {
         getCompactCapture: () => undefined,
       },
     );
-    if (abort) controller.abort();
+    if (abort) await controller.dispose();
     pull.reject(new Error("usage stream failed"));
     // The rejection and catch run before the next turn of the event loop.
     await setImmediate();

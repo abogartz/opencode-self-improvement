@@ -1,14 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
   captureSessionID,
-  foldUsage,
-  forgetUsage,
-  sessionDirectoryFromMessages,
-  sessionDirectoryFromRow,
   sessionIdentityEvent,
   sessionUsageEvent,
-  toolIdentity,
 } from "../../src/identity/host-events.ts";
+import { foldUsage, forgetUsage } from "../../src/status/usage.ts";
+import {
+  toolIdentity,
+  sessionDirectoryFromMessages,
+  sessionDirectoryFromRow,
+} from "../../src/core/host.ts";
 
 describe("host compatibility adapters", () => {
   test("tool context uses id, with missing fields left to the caller's synchronous fallback", () => {

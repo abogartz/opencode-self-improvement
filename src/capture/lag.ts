@@ -1,32 +1,14 @@
-// lag — split from src/capture.ts. Declaration bodies are unchanged.
+import type { CaptureTranscript } from "../host/capture.ts";
 
-/**
- * Age of the newest message in a session context, in ms, or null when no
- * message carries a timestamp. Capture uses this to say how stale a transcript
- * was at the moment the model was asked for candidates.
- */
-export function lagSince(messages: unknown, now = Date.now()): number | null {
+/** Age of the newest message in this window, or null without a timestamp. */
+export function lagSince(
+  messages: CaptureTranscript | undefined,
+  now = Date.now(),
+): number | null {
   let newest = 0;
-  for (const raw of Array.isArray(messages) ? messages : []) {
-    const m = raw as Record<string, any>;
-    // The real 2.2.x session context carries time.created/time.completed
-    // (fixtures/host-session-context-2.2.5.json); time.updated was the only
-    // time.* field read, so every live capture_lag line recorded no lag at
-    // all. Read the whole family; the legacy flat names stay for old shapes.
-    const at =
-      m?.time?.updated ??
-      m?.time?.completed ??
-      m?.time?.created ??
-      m?.createdAt ??
-      m?.created ??
-      m?.timestamp;
-    const ms =
-      typeof at === "number"
-        ? at
-        : typeof at === "string"
-          ? Date.parse(at)
-          : Number.NaN;
-    if (Number.isFinite(ms) && ms > newest) newest = ms;
+  for (const message of messages ?? []) {
+    const ms = message.timestamp;
+    if (ms !== undefined && Number.isFinite(ms) && ms > newest) newest = ms;
   }
   return newest ? now - newest : null;
 }

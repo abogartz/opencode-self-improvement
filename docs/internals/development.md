@@ -19,6 +19,19 @@ rule stay in the README.
 
 The test scripts run files across at most four worker processes with Bun's file isolation. To reproduce an order-dependent failure the way it would appear in one shared process, run `bun test ./test/` or `bun test ./e2e/ --timeout 240000` directly.
 
+## Host interface and reference harness
+
+The [host contract](host-contract.md) specifies the ports, semantic obligations,
+capabilities and shared project/global ownership rules. `src/runtime/` contains
+the shared setup, lifecycle and capture policy; `test/simulator/` implements the
+same interface with controlled failures and event ordering. Run
+`bun run test:simulator` without installing another harness or using a model
+service. These tests also run in the ordinary unit suite.
+
+Production adapter extraction is separate from this reference implementation.
+The existing OpenCode entry point and translation modules remain available while
+the shared engine is isolated. The package has no second harness export here.
+
 ## What the smoke suite boots
 
 Both smoke jobs run the same suite and print the exact OpenCode CLI version.

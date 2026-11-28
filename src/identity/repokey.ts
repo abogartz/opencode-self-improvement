@@ -153,7 +153,9 @@ export function isCaseInsensitivePath(dir: string): boolean | null {
 export function normalizeDirPath(p: string): string {
   let r = p;
   try {
-    r = realpathSync(r);
+    // Bun's non-native Windows resolver can retain 8.3 aliases. Different hosts
+    // may report short and long spellings of the same directory.
+    r = process.platform === "win32" ? realpathSync.native(r) : realpathSync(r);
   } catch {
     // deleted/unreadable mid-resolve: hash the given spelling rather than throw
   }
@@ -190,6 +192,11 @@ export function resolveRepo(startDir: string): RepoScope {
 // ever seen.
 const byDir = new Map<string, RepoScope>();
 const bySession = new Map<string, { dir: string; scope: RepoScope }>();
+
+/** Opaque binding identity, replaced even when a session moves away and back. */
+export function sessionBindingToken(sid: string): object | undefined {
+  return bySession.get(sid);
+}
 
 function scopeForDir(dir: string): RepoScope {
   let s = byDir.get(dir);

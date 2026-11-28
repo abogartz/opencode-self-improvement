@@ -1,407 +1,57 @@
-// opencode-self-improvement: one opencode plugin bundling durable memory, the
-// 4-gate write pipeline, deterministic reflection triggers T1/T2/T4,
-// tiny-digest injection with deterministic memory-first context and
-// contextual pull, and snapshot/rollback.
-//
-// Registers tools via `ctx.tool.transform` (JSON Schema) and hooks via the
-// OpenCode V2 session/tool API. Slash commands are installed as markdown by
-// src/command.ts. The default export `{ id, setup(ctx) }` is checked against
-// the SDK's Plugin type using a type-only import (see the note on `plugin`).
-import { registerHooks, type RideAt } from "./events.ts";
-import { forgetUsage } from "./identity/host-events.ts";
-import { guarded, setGuardedFailureReporter } from "./core/hooks.ts";
+import type { MemoryHost } from "./host/runtime.ts";
 import type { PluginCtx } from "./core/host.ts";
-import type { Cleanup, Plugin } from "@opencode/plugin/promise/plugin";
-import { basename, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { frontierBudget, injectBudget } from "./core/config/budgets.ts";
-import { memoryRoot } from "./core/config/paths.ts";
-import { loadAll, malformedCount } from "./store/files/load.ts";
-import { snapshotFiles } from "./store/files/snapshots.ts";
-import {
-  clearSuperseded,
-  markManySuperseded,
-  markSuperseded,
-} from "./store/files/supersede.ts";
-import { resolveMemoryTarget } from "./store/files/target.ts";
-import { type Memory } from "./store/model/memory.ts";
-import { isActive, isInjectable } from "./store/model/predicates.ts";
-import { evidenceVisibleTo, isVisibleTo } from "./store/model/visibility.ts";
-import { auditCaveat, sameStrList, type WriteCandidate } from "./gate/gate.ts";
-import { withStoreLock } from "./store/lock.ts";
-import {
-  isQuarantined,
-  quarantineReasons,
-} from "./store/quarantine/quarantine.ts";
-import { pruneMemory } from "./store/prune.ts";
-import { findStaleOpen } from "./portable/decay.ts";
-import { exportMemories } from "./portable/export.ts";
-import { importMemories } from "./portable/import.ts";
-import { listSnapshots, restoreSnapshot } from "./store/undo.ts";
-import {
-  evidenceFileFor,
-  record,
-  recordBestEffort,
-} from "./telemetry/record.ts";
-import { proposeConsolidations } from "./consolidate/propose.ts";
-import { renderProposals } from "./consolidate/render.ts";
-import { readReads } from "./telemetry/ledger.ts";
-import { formatMemory } from "./inject/format.ts";
-import { sharedTerms } from "./recall/shared-terms.ts";
-import {
-  configureAutoCapture,
-  CAPTURE_EVENT_TYPES,
-} from "./capture/runtime.ts";
-export {
-  resetCaptureCooldowns,
-  TURN_END_EVENTS,
-  CAPTURE_EVENT_TYPES,
-  captureTriggerFor,
-} from "./capture/runtime.ts";
-export { resetSessionModels } from "./capture/session-model.ts";
-import { createInjectionEpochs } from "./inject/epochs.ts";
-import { pullScopeFrom } from "./inject/pull.ts";
-import { createSessionContext } from "./identity/session-context.ts";
-import { registerMemoryTools } from "./tools/registry.ts";
-import {
-  readLedger,
-  neverRetrieved,
-  recordHits,
-  type HitSource,
-} from "./telemetry/ledger.ts";
-import { formatInit } from "./init/format.ts";
-import { runInit } from "./init/run.ts";
+import { createOpenCodeHost } from "./core/host.ts";
+import { createOpenCodeLifecycle } from "./events.ts";
+import { createOpenCodeCapture } from "./capture/runtime.ts";
 import { ensureInitCommand, ensureMemoryReportCommand } from "./init/ensure.ts";
-import { captureLag, captureLagLines, rowsPerDay } from "./status/metrics.ts";
-import { type Measured, type StoreCounts } from "./status/payload.ts";
-import { renderMemoryReport } from "./status/report.ts";
-import { blockedRecent } from "./status/write.ts";
-import { firstFrontierTap, markFrontierTap } from "./capture/triggers.ts";
-import { peekTurn, setCurrent } from "./core/state.ts";
-import {
-  resolveRepo,
-  setRepoScope,
-  rememberSessionDir,
-  bindSessionProvisional,
-  writeTarget,
-} from "./identity/repokey.ts";
-import { parseLine } from "./core/logfmt/format.ts";
-import { readLines } from "./core/logfmt/read.ts";
-import { parseModelRef } from "./capture/candidates.ts";
-import { flattenMemoryText } from "./store/sanitize.ts";
-import { bunFloorWarning } from "./core/runtime.ts";
+import { openCodeCapabilities } from "./core/host.ts";
 
-// Tool/input boundaries are zod schemas (src/schema.ts): the JSON Schema the
-// host sees is GENERATED from them, and raw args are re-parsed at execution.
-import {
-  DecayArgs,
-  EmptyArgs,
-  EvidenceArgs,
-  ExportArgs,
-  ForgetArgs,
-  ImportArgs,
-  InitArgs,
-  ConsolidateArgs,
-  MergeReviewArgs,
-  RecallArgs,
-  RememberArgs,
-  UndoArgs,
-  UpdateArgs,
-  validated,
-} from "./tools/schema.ts";
+/** Translate OpenCode services into the same ports used by every memory host. */
+export function createOpenCodeMemoryHost(ctx: PluginCtx): MemoryHost {
+  return {
+    harness: "opencode",
+    get capabilities() {
+      return openCodeCapabilities(ctx);
+    },
+    tools: createOpenCodeHost(ctx),
+    lifecycle: createOpenCodeLifecycle(ctx),
+    // Hook registration may attach APIs, so inspect capture afterward.
+    get capture() {
+      return createOpenCodeCapture(ctx);
+    },
+    async installCommands() {
+      await ensureInitCommand();
+      await ensureMemoryReportCommand();
+    },
+  };
+}
 
-const PLUGIN_ID = "opencode-self-improvement";
+import type { Plugin } from "@opencode/plugin/promise/plugin";
 
-// The setup-time Bun-floor warning fires once per process (setup can run for
-// more than one location).
-let bunFloorChecked = false;
+import { setupMemory } from "./runtime/setup.ts";
 
-// The real setup implementation, written against the loose local PluginCtx
-// (the only members of the V2 context this plugin actually touches).
-const impl = {
-  async setup(ctx: PluginCtx): Promise<Cleanup | void> {
-    // Identity vs verification tree are separate concerns: the repo STAMP is
-    // resolved per session from the event stream (never from process.cwd(),
-    // which is the server launch dir and poisons rows invisibly); cwd remains
-    // only as the gate's verification tree when no session location is known.
-    const setupRoot = ctx?.location?.directory;
-    const liveRoot = setupRoot ?? process.cwd();
-    // mirror every swallowed guarded() failure into the evidence file.
-    // Hook name + error class ONLY — never the message, which can carry
-    // conversation content. A failed mirror counts as a dropped diagnostic.
-    setGuardedFailureReporter((name, err) =>
-      recordBestEffort(
-        "hook_error",
-        {
-          hook: name,
-          error:
-            err instanceof Error
-              ? err.constructor?.name || "Error"
-              : typeof err,
-        },
-        false,
-      ),
-    );
-    setRepoScope(setupRoot ? resolveRepo(setupRoot) : null);
-    // THIS instance's own workspace. The module scope says who loaded last;
-    // this says who I am. An unbound session that calls into THIS instance
-    // resolves here — never to another instance's scope (multi-setup).
-    const instanceDir =
-      typeof setupRoot === "string" && setupRoot ? setupRoot : undefined;
-
-    // Character budgets: relevance injection and contextual pulls share the
-    // existing cap; the session-start frontier has its own larger cap. Plugin
-    // options win over env fallbacks, and the frontier defaults to 3x the
-    // effective injection budget.
-    const budget = Number(ctx.options?.injectBudget) || injectBudget();
-    const openBudget =
-      Number(ctx.options?.frontierBudget) || frontierBudget(budget);
-
-    // Warn-once Bun floor check (same setup-time warning style as the
-    // captureModel warnings below): opencode embeds Bun, and the store code's
-    // fs failure modes are Bun-version dependent, so flag an old host.
-    if (!bunFloorChecked) {
-      bunFloorChecked = true;
-      const floorWarning = bunFloorWarning(
-        typeof Bun === "undefined" ? undefined : Bun.version,
-      );
-      if (floorWarning) console.warn(floorWarning);
-    }
-
-    // Mirror the /repo-init slash command into opencode's global commands dir
-    // (idempotent, write-if-missing). OpenCode 2.x loads `*.md` from
-    // ~/.config/opencode/commands, so this is the canonical V2 install path.
-    await ensureInitCommand();
-    await ensureMemoryReportCommand();
-
-    const {
-      gateContext,
-      ownerlessWriter,
-      refuseOwnerlessWrite,
-      toolIds,
-      bindSessionFromApi,
-      bindSessionIdentity,
-    } = createSessionContext(ctx, { instanceDir, liveRoot });
-
-    // ---- tools --------------------------------------------------------------
-    // Use ledger. `query` is what retrieval was asked with; what gets
-    // stored is the vocabulary the answer SHARES with the query, taken from the
-    // memory side, so the ledger can never become a copy of user prompts.
-    // Fail-soft inside recordHits: telemetry must not break a read path.
-    const noteHits = async (
-      src: HitSource,
-      sid: string,
-      rows: Memory[],
-      query: string,
-      // Deferred pull credits retain the original turn and throttle window.
-      at?: RideAt,
-    ): Promise<void> => {
-      if (!rows.length || !query.trim()) return;
-      const terms: string[] = [];
-      for (const m of rows)
-        for (const t of sharedTerms(query, m))
-          if (!terms.includes(t)) terms.push(t);
-      // the turn is what joins a ride to the outcome of that same turn.
-      // Read, never created-for: markTurn has already run for any session that
-      // can reach a read path, so this does not seed state.
-      const observed = at ? { turn: at.turn, key: at.turnKey } : peekTurn(sid);
-      await recordHits(
-        src,
-        sid,
-        rows,
-        terms,
-        at?.placedAt ?? Date.now(),
-        observed?.turn,
-        observed?.key,
-        at,
-      );
-    };
-    // The host listener owns measured usage; the epoch controller drops it
-    // alongside its own maps when the shared session LRU evicts an entry.
-    const measuredTurns = new Map<string, Measured>();
-    const sessions = createInjectionEpochs({
-      budget,
-      frontierBudget: openBudget,
-      // Code-check guided claims by default; explicit false opts out.
-      contradictionSurface: ctx.options?.contradictionSurface !== false,
-      measuredTurns,
-      forgetUsage,
-      noteHits: (sid, rows, query) => noteHits("inject", sid, rows, query),
-    });
-    const flushStatus = sessions.flushStatus;
-
-    await ctx.tool?.transform((editor) =>
-      registerMemoryTools(editor, {
-        toolIds,
-        bindSessionIdentity,
-        ownerlessWriter,
-        refuseOwnerlessWrite,
-        gateContext,
-        sessions,
-        noteHits,
-        direct: { codemode: false } as const,
-      }),
-    );
-    // ---- hooks (all fail-closed) -------------------------------------------
-    // Seam set by the auto-capture wiring below ONLY when the compaction
-    // trigger is live (autoCapture not false, captureOnCompact not false, and a
-    // model that resolves — the option, the session, or the host default). The
-    // compaction hook calls it fire-and-forget; undefined means "off".
-    // Declared here because the hook registers before capture.
-    let onCompactCapture:
-      | ((sid: string, messages: unknown) => void)
-      | undefined;
-
-    const measuredController = await registerHooks(ctx, {
-      guarded,
-      sessions,
-      instanceDir,
-      budget,
-      noteHits,
-      bindSessionIdentity,
-      bindSessionFromApi,
-      measuredTurns,
-      flushStatus,
-      // Which tool results carry a pull, and what the pull searches. Measured
-      // default in src/inject/pull.ts; `pullOutputChars: 0` in the plugin config
-      // restores the old arguments-only behaviour, `pullTools` narrows the set,
-      // and `pullTools: []` switches the channel off. A value that does not
-      // parse falls back to the measured default and says so on the console —
-      // the same setup-time warning style as the Bun floor and captureModel
-      // checks above, because a config line that silently does nothing is the
-      // failure nobody debugs.
-      pullScope: pullScopeFrom(ctx.options, (message) =>
-        console.warn(`[opencode-self-improvement] ${message}`),
-      ),
-      getCompactCapture: () => onCompactCapture,
-    });
-    // ---- auto-capture (turn-end + compaction triggers) ---------------------
-    // Armed unless the config sets `autoCapture: false`. (The measured-cache
-    // listener above also subscribes to the event stream, and it is
-    // zero-model: pure bookkeeping of message usage.) While armed — the switch
-    // not false, and a parseable `captureModel` whenever one is given — each
-    // supported turn-end event, and unless `captureOnCompact` is false each
-    // compaction hook call too, runs ONE cheap ctx.generate.text call whose
-    // reply is parsed into candidates that go through the SAME runWriteGate as
-    // model-authored writes — capture can never bypass the moat, and it only
-    // ever writes through the gate. A per-session, per-trigger cooldown bounds
-    // the cost. Compaction-triggered rows carry the CAPTURE_COMPACT_TAG tag and
-    // auto_capture_compaction_* evidence lines, idle rows keep auto_capture_*,
-    // so decay/status — and bench/runners/capture-trigger-compare.ts — can measure
-    // which trigger earns its tokens. Every failure is swallowed: capture must
-    // never be able to break a session.
-    const capture = configureAutoCapture(ctx, {
-      instanceDir,
-      gateContext,
-      guarded,
-      // Fix A (FINDINGS 2026-11-08 §4b): guided promotion moves every tracked
-      // epoch, so a late guided row enters the hint lane on each session's
-      // next request instead of waiting for a request that happens to notice.
-      onGuidedPromoted: async () => {
-        await sessions.refreshAll();
-      },
-    });
-    onCompactCapture = capture.onCompactCapture;
-    const captureCleanup = capture.cleanup;
-    // ---- startup heartbeat ------------------------------------------
-    // Every other evidence line is written BY something that already worked,
-    // so "capture is off", "capture is misconfigured" and "capture is armed and
-    // inert" were indistinguishable from anything a user could read - which is
-    // exactly how a pipeline that had never run in ten days survived a review
-    // and a merge. This one line makes the ABSENCE of capture activity
-    // interpretable: `capture=` names why, `subscribed=` lists the event types
-    // the subscription actually reacts to. Guarded like every other hook: a
-    // broken store must not turn plugin load into a throw.
-    await guarded("plugin_load heartbeat", async () => {
-      let pluginVersion = "unknown";
-      // Which COPY of this plugin the host actually loaded. Version alone could
-      // not answer it: a checkout and the published package it came from share
-      // a version, and the npm cache has held a stale one while a session ran
-      // against something else entirely. The heartbeat now names the directory,
-      // so "is my change live?" is one grep instead of an afternoon.
-      let entryDir = "unknown";
-      try {
-        const pkg = await Bun.file(
-          new URL("../package.json", import.meta.url),
-        ).json();
-        if (typeof pkg?.version === "string") pluginVersion = pkg.version;
-      } catch {
-        // a heartbeat with an unknown version still beats no heartbeat
-      }
-      try {
-        entryDir = fileURLToPath(new URL("../", import.meta.url));
-      } catch {
-        // same: the version line is still worth emitting
-      }
-      // Auto-capture is armed unless the config opts it out: an absent key
-      // means on, so the switch is read as a negative opt-out.
-      const wantCapture = ctx.options?.autoCapture !== false;
-      // an omitted captureModel is a valid arm — the capture inherits
-      // the session's model (session.context) or the host default. Only an
-      // explicit but malformed string is invalid_model.
-      const captureModelOpt = ctx.options?.captureModel;
-      const modelOk =
-        captureModelOpt === undefined || !!parseModelRef(captureModelOpt);
-      const capabilities = [
-        "event.subscribe",
-        "generate.text",
-        "session.context",
-      ].filter((name) => {
-        const [domain, method] = name.split(".");
-        return (
-          typeof (ctx as unknown as Record<string, any>)?.[domain]?.[method] ===
-          "function"
-        );
-      });
-      const captureState = !wantCapture
-        ? // captureOnCompact alone is a distinct misconfiguration (the
-          // runtime warns about it and stays disabled) — name it, or "off
-          // (default)" and "wrong switch set" share one line.
-          ctx.options?.captureOnCompact === true
-          ? "switch_mismatch"
-          : "off"
-        : !modelOk
-          ? "invalid_model"
-          : capabilities.length < 3
-            ? "no_capabilities"
-            : "on";
-      await record(
-        "plugin_load",
-        {
-          version: pluginVersion,
-          entry: entryDir,
-          capture: captureState,
-          capture_on_compact: ctx.options?.captureOnCompact !== false,
-          capabilities: `[${capabilities.join(",")}]`,
-          subscribed: `[${CAPTURE_EVENT_TYPES.join(",")}]`,
-          inject_budget: injectBudget(),
-          store_rows: (await loadAll()).length,
-        },
-        false,
-      );
-    });
-    // Single cleanup returned by setup: tears down the measured listener and,
-    // when enabled, the capture subscription. Future teardowns merge in here.
-    return () => {
-      measuredController.abort();
-      if (captureCleanup) return captureCleanup();
-    };
-  },
-};
-
-// The plain object IS the V2 contract ({ id, setup }); the SDK's `Plugin` type
-// pins its shape at compile time. The import is deliberately type-only:
-// opencode installs npm plugins with runtime dependencies only, so a value
-// import of @opencode/plugin —
-// a devDependency here — would fail to resolve at load time for published
-// consumers, and making it a runtime dependency would pull effect +
-// @opencode/client into every install, the exact dead-weight problem dropping
-// the V1 SDK fixes. `Plugin.define` is an identity function at runtime, so this
-// annotation buys the same compile-time contract for zero runtime cost.
+// Type-only SDK import: published installs have runtime dependencies only.
 const plugin: Plugin = {
-  id: PLUGIN_ID,
-  setup: async (ctx) => impl.setup(ctx as unknown as PluginCtx),
+  id: "opencode-self-improvement",
+  async setup(raw) {
+    const ctx = raw as unknown as PluginCtx;
+    const runtime = await setupMemory(createOpenCodeMemoryHost(ctx), {
+      directory: ctx.location?.directory,
+      options: ctx.options,
+    });
+    return () => runtime.dispose();
+  },
 };
 
 export const SelfImprovement = plugin;
 export default plugin;
+
+// Preserve the OpenCode entry point while shared initialization lives independently.
+
+export { resetCaptureCooldowns } from "./runtime/capture.ts";
+export { resetSessionModels } from "./capture/session-model.ts";
+export {
+  TURN_END_EVENTS,
+  CAPTURE_EVENT_TYPES,
+  captureTriggerFor,
+} from "./capture/runtime.ts";

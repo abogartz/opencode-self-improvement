@@ -5,7 +5,7 @@
 // on some Bun+Windows combos — so an old host shows up as odd memory errors,
 // not as a clean "unsupported" signal. MIN_BUN is the lower bound of the Bun
 // versions this repo has actually been run against: 1.3.10 and 1.4.4. Pure
-// module: nothing here reads the environment; the caller (src/index.ts)
+// module: nothing here reads the environment; the caller (src/runtime/setup.ts)
 // injects the version string, so these helpers are unit-testable anywhere.
 
 export const MIN_BUN: readonly [number, number, number] = [1, 3, 0];
@@ -27,7 +27,7 @@ function cmpTriples(a: readonly number[], b: readonly number[]): number {
 // One-line startup warning when the host's Bun is below MIN_BUN or its version
 // could not be parsed; null when the version looks fine. Warn-only by design:
 // an old embedded bun should be visible, but must not stop memory from
-// loading. The caller decides how often to emit it (src/index.ts: once).
+// loading. The caller decides how often to emit it (src/runtime/setup.ts: once).
 export function bunFloorWarning(
   versionString: string | undefined,
 ): string | null {

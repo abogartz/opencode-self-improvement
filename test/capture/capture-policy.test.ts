@@ -1,3 +1,4 @@
+import { decodeTranscript } from "../../src/capture/transcript.ts";
 // Capture policy: when is a capture worth paying for?
 //
 // The unit altitude — the signal verdicts and the cursor arithmetic. The e2e
@@ -8,12 +9,22 @@ import {
   captureCursor,
   captureSignalSince,
   deltaMessages,
-  guidedStatementInWindow,
-  prefixFingerprint,
+  guidedStatementInWindow as normalizedGuidedStatementInWindow,
+  prefixFingerprint as normalizedPrefixFingerprint,
   resetCaptureCursors,
-  transcriptReplaced,
+  transcriptReplaced as normalizedTranscriptReplaced,
 } from "../../src/capture/policy.ts";
 import type { SessionState, ToolResult } from "../../src/core/state.ts";
+
+// Keep the host-shape regression cases through the adapter's explicit decode.
+const prefixFingerprint = (raw: unknown, count: number) =>
+  normalizedPrefixFingerprint(decodeTranscript(raw), count);
+const transcriptReplaced = (
+  raw: unknown,
+  cursor: { msgs: number; fp?: string },
+) => normalizedTranscriptReplaced(decodeTranscript(raw), cursor);
+const guidedStatementInWindow = (raw: unknown, since: number) =>
+  normalizedGuidedStatementInWindow(decodeTranscript(raw), since);
 
 const call = (over: Partial<ToolResult>): ToolResult => ({
   call: `c-${Math.random().toString(36).slice(2, 8)}`,
@@ -301,7 +312,7 @@ describe("deltaMessages", () => {
 
   test("a non-array payload passes through untouched", () => {
     expect(deltaMessages(undefined, 3)).toBe(undefined);
-    expect(deltaMessages("seeded string", 3)).toBe("seeded string");
+    expect(deltaMessages(decodeTranscript("seeded string"), 3)).toBeUndefined();
   });
 });
 

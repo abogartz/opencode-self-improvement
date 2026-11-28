@@ -1,5 +1,6 @@
-// Per-setup session binding and caller context. The host object is kept
-// intact so optional API methods retain their receiver and are read at call time.
+// Per-setup session binding and caller context. Adapters provide normalized
+// identities and directory lookups; ownership and lookup ordering stay here.
+import type { SessionDirectories, ToolCallContext } from "../host/contracts.ts";
 import type { GateContext } from "../gate/gate.ts";
 import { captureEvidenceContext, record } from "../telemetry/record.ts";
 import { unresolvedWriteMessage } from "../store/files/append.ts";
@@ -18,21 +19,8 @@ import {
   sessionDirFirm,
   rememberSessionDir,
 } from "./repokey.ts";
-import {
-  toolIdentity,
-  sessionDirectoryFromMessages,
-  sessionDirectoryFromRow,
-} from "./host-events.ts";
-
-interface SessionLookupHost {
-  session?: {
-    context?: (input: { sessionID: string }) => Promise<unknown>;
-    get?: (input: { sessionID: string }) => Promise<unknown>;
-  };
-}
-
 export function createSessionContext(
-  ctx: SessionLookupHost,
+  directories: SessionDirectories,
   {
     instanceDir,
     liveRoot,
@@ -87,14 +75,14 @@ export function createSessionContext(
   };
 
   // Identity of a tool call, captured SYNCHRONOUSLY at the tool's entry —
-  // the first await of the call comes after this. The V2 host hands every
-  // execute a per-call ToolContext carrying sessionID; the harness and any
-  // host that omits it fall back to the ambient current, which is correct
-  // exactly because execute.before ran immediately before this tool with
-  // no await between ( documented fallback). Never re-read the global
-  // after an await to learn who is calling.
-  const toolIds = (context?: unknown): { sid: string; call: string } => {
-    const { sessionID: fromCtx, callID: call } = toolIdentity(context);
+  // the first await of the call comes after this. Adapters supply per-call
+  // identity. A legacy caller may omit it only when the before-tool hook set
+  // the ambient current immediately before entry, with no intervening await.
+  // Never re-read the global after an await to learn who is calling.
+  const toolIds = (
+    context?: ToolCallContext,
+  ): { sid: string; call: string } => {
+    const { sessionID: fromCtx, callID: call } = context ?? {};
     // Entry binding: a session this instance has never seen is resolved to
     // THIS workspace (provisional — a firm event/API identity still
     // replaces it), so the tool's reader partitions by the repository the
@@ -127,8 +115,7 @@ export function createSessionContext(
     // await this identity source rather than fall through to a provisional one.
     const binding = Promise.resolve().then(async () => {
       try {
-        const msgs = await ctx.session?.context?.({ sessionID: sid });
-        const dir = sessionDirectoryFromMessages(msgs);
+        const dir = await directories.fromTranscript?.(sid);
         if (dir !== undefined) rememberSessionDir(sid, dir);
       } catch {
         // no context access or host error: the event stream still binds later
@@ -165,8 +152,7 @@ export function createSessionContext(
     apiBindOrder.touch(sid);
     const binding = Promise.resolve().then(async () => {
       try {
-        const got = await ctx.session?.get?.({ sessionID: sid });
-        const dir = sessionDirectoryFromRow(got);
+        const dir = await directories.fromSession?.(sid);
         if (dir !== undefined) rememberSessionDir(sid, dir);
       } catch {
         // no session.get on this host (or unknown session): stay unbound

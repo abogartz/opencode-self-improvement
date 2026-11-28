@@ -7,7 +7,14 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { commandsDir } from "../core/config/paths.ts";
+import { homedir } from "node:os";
+
+export function commandsDir(): string {
+  return (
+    process.env.OPENCODE_COMMANDS_DIR ||
+    join(homedir(), ".config", "opencode", "commands")
+  );
+}
 
 const PKG_COMMANDS = join(
   dirname(fileURLToPath(import.meta.url)),

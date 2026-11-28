@@ -60,6 +60,9 @@ is the map. A new document anywhere under `docs/` must gain a line below —
 
 ## Developing the plugin
 
+- [Host interface and reference implementation](internals/host-contract.md) —
+  adapter obligations, optional capabilities and the programmable test host.
+
 - [Development internals](internals/development.md) — contributors: what the local
   commands really run, what the smoke suite boots, and how the published npm
   surface is decided.
