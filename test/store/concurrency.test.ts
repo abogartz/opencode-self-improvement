@@ -4,7 +4,7 @@
 // snapshot restore REWRITE a whole file: a writer that read before another's
 // write publishes a stale copy and silently destroys the other's rows, and the
 // truncate-then-write in between lets a reader observe a half file.
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   mkdirSync,
   mkdtempSync,
@@ -28,10 +28,15 @@ import {
   setLockBusyInjector,
 } from "../../src/store/lock.ts";
 import { removeStore } from "../helpers/remove-store.ts";
+import * as evidence from "../../src/telemetry/record.ts";
 
 const DAY = new Date().toISOString().slice(0, 10);
 const store = () => join(memoryRoot(), `${DAY}.logfmt`);
 let root: string;
+const record = evidence.record;
+const pendingEvidence = new Set<Promise<void>>();
+let evidenceErrors: unknown[];
+let restoreEvidence = () => {};
 
 // A starved Windows worker can spend >5s inside one fs burst (green runs
 // measured supersede racing at 5.5s, lifecycle hooks past 8s), and Bun
@@ -42,12 +47,33 @@ beforeEach(() => {
   process.env.OPENCODE_MEMORY_DIR = join(root, "memory");
   process.env.OPENCODE_COMMANDS_DIR = join(root, "commands");
   mkdirSync(memoryRoot(), { recursive: true });
+  evidenceErrors = [];
+  // Lock diagnostics outlive a refused operation. Keep their real writes and
+  // errors, and drain them before the fixture's directory can disappear.
+  const spy = spyOn(evidence, "record").mockImplementation(
+    (...args: Parameters<typeof record>) => {
+      const write = record(...args);
+      const settled = write.then(
+        () => {},
+        (error: unknown) => {
+          evidenceErrors.push(error);
+        },
+      );
+      pendingEvidence.add(settled);
+      void settled.then(() => pendingEvidence.delete(settled));
+      return write;
+    },
+  );
+  restoreEvidence = () => spy.mockRestore();
 }, 30_000);
 
-afterEach(() => {
+afterEach(async () => {
+  while (pendingEvidence.size) await Promise.all(pendingEvidence);
+  restoreEvidence();
   delete process.env.OPENCODE_MEMORY_DIR;
   delete process.env.OPENCODE_COMMANDS_DIR;
   removeStore(root);
+  expect(evidenceErrors).toEqual([]);
 }, 30_000);
 
 async function rawLines(): Promise<string[]> {

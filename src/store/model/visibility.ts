@@ -83,6 +83,9 @@ function matchesRepository(
     // The historical hash used realpath too: repoPath itself may name a
     // symlink/junction, a short Windows spelling, or contain dot segments.
     const canonical = normalizeDirPath(repoPath);
+    // Preserve ownership of old path keys even when normalization improves
+    // (for example, expanding a Windows short name that was previously hashed).
+    if (canonical === normalizeDirPath(scope.path)) return true;
     const legacyKey = createHash("sha1")
       .update(canonical.toLowerCase())
       .digest("hex")

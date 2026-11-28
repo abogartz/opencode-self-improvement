@@ -1,6 +1,6 @@
 # ADR 0006 — Capture prompt integrity: redaction order and faithful citation
 
-Status: accepted (2026-11). Code: `src/capture/runtime.ts`, `buildCapturePrompt`.
+Status: accepted (2026-11). Code: `src/runtime/capture.ts`, `buildCapturePrompt`.
 
 ## Decisions
 

@@ -27,14 +27,12 @@ export const register: ToolRegister = (editor, deps) => {
     refuseOwnerlessWrite,
     gateContext,
     sessions,
-    direct,
   } = deps;
   editor.add(
     validated(UpdateArgs, {
       name: "memory_update",
       description:
         "Update an existing memory (gated like remember; the prior entry is superseded, not erased). `query` selects which row to update: its exact id (ts), a clock fragment (e.g. HH:MM:SS.mmm), or a unique substring of its content. Omitting `query` targets the most recent active row of scope+type. An unmatched or ambiguous `query` fails closed and writes nothing. A prose edit carries over everything the call does not name — ordinary tags, issue, keywords, status, and the row's repository. Capture-only guidance provenance is removed from replacements. Naming a row that was already updated to exactly this content (metadata included) reports the duplicate; if its live successor holds the prose and only the metadata you name differs, the successor is updated. A failure after the write is reported as PARTIAL: the replacement is durable and memory_undo merge/force restores the old row.",
-      options: direct,
       async execute(args, context): Promise<{ content: string }> {
         const { sid } = toolIds(context);
         await bindSessionIdentity(sid);

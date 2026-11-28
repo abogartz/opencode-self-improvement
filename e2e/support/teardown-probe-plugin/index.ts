@@ -19,6 +19,8 @@ export default {
     const controller = new AbortController();
     const events = ctx.event.subscribe({ signal: controller.signal });
     record("subscribed");
+    process.once("beforeExit", () => record("beforeExit"));
+    process.once("exit", () => record("exit"));
 
     void (async () => {
       try {
@@ -40,6 +42,11 @@ export default {
         if (!controller.signal.aborted) record(`error:${String(error)}`);
       }
     })();
-    return () => controller.abort();
+    return async () => {
+      record("cleanup-start");
+      controller.abort();
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      record("cleanup-end");
+    };
   },
 };

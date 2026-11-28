@@ -32,6 +32,7 @@ import type { Memory } from "../store/model/memory.ts";
 import type { ReadSet } from "../consolidate/propose.ts";
 
 import { type EvidenceContext, record } from "./record.ts";
+import { currentHarness } from "./harness.ts";
 
 export type HitSource = "inject" | "pull" | "recall";
 
@@ -151,7 +152,10 @@ export async function recordHits(
 ): Promise<boolean> {
   if (!rows.length) return false;
   const ids = rows.map((m) => m.ts);
-  const key = `${source}|${sid}|${ids.join(",")}`;
+  const harness = receipt?.evidence
+    ? (receipt.evidence.harness ?? "unknown")
+    : currentHarness();
+  const key = `${harness}|${source}|${sid}|${ids.join(",")}`;
   if (inFlight.has(key)) return false;
   const eligibleAt = nextAttempt.get(key);
   if (eligibleAt !== undefined && now < eligibleAt) return false;
@@ -169,6 +173,7 @@ export async function recordHits(
   }
   const line = formatLine({
     ev: "memory_used",
+    harness,
     ts: new Date(receipt?.observedAt ?? now).toISOString(),
     src: source,
     sid,
@@ -266,6 +271,7 @@ export async function recordOutcome(
 ): Promise<boolean> {
   if (!sid || !Number.isSafeInteger(turn) || turn < 1) return false;
   const file = hitsFile();
+  const harness = currentHarness();
   try {
     await withStoreLock(
       file,
@@ -273,6 +279,7 @@ export async function recordOutcome(
         await rotateIfNeeded();
         const line = formatLine({
           ev: "gate_outcome",
+          harness,
           ts: new Date(now).toISOString(),
           sid,
           turn,

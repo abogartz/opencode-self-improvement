@@ -1,8 +1,9 @@
+import { decodeTranscript } from "../../src/adapters/opencode/transcript.ts";
 //— the store's own numbers: what a row costs, how fast the store grows,
 // how stale a capture is, and how much of the store never gets retrieved.
 // These are reported, never acted on; the tests pin the math and the wording.
 import { describe, expect, test } from "bun:test";
-import { lagSince } from "../../src/capture/lag.ts";
+import { lagSince as normalizedLagSince } from "../../src/capture/lag.ts";
 import { formatLine } from "../../src/core/logfmt/format.ts";
 import { fmtBytes, fmtMs } from "../../src/status/format.ts";
 import {
@@ -13,6 +14,9 @@ import {
 
 const at = (daysAgo: number) =>
   new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+
+const lagSince = (raw: unknown, now: number) =>
+  normalizedLagSince(decodeTranscript(raw), now);
 
 describe("store self-metrics", () => {
   test("percentile is nearest-rank and never invents a number", () => {

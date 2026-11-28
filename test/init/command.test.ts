@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resetState } from "../../src/core/state.ts";
-import { ensureCommand } from "../../src/init/ensure.ts";
+import { ensureCommand } from "../../src/adapters/opencode/commands.ts";
 import { loadPlugin } from "../harness.ts";
 import { removeStore } from "../helpers/remove-store.ts";
 

@@ -9,8 +9,9 @@
 //
 // Both are fixable with facts the plugin already holds in-process at zero token
 // cost, so neither gate needs a model call to decide.
+import type { CaptureTranscript } from "../host/capture.ts";
 import type { SessionState } from "../core/state.ts";
-import { conversationTurns, flattenTranscript } from "./transcript.ts";
+import { conversationTurns, flattenTranscript } from "../runtime/transcript.ts";
 
 /**
  * How many messages of a session's context a capture has already mined. The
@@ -62,7 +63,7 @@ function fingerprintOf(text: string): string {
  * What the delta exists to avoid paying is the capture MODEL call, not this.
  */
 export function prefixFingerprint(
-  msgs: unknown,
+  msgs: CaptureTranscript | undefined,
   count: number,
 ): string | undefined {
   if (!Array.isArray(msgs) || count <= 0 || msgs.length < count)
@@ -116,7 +117,7 @@ export function resetCaptureCursors(): void {
  * length check, so an upgrade never restarts a window on its own.
  */
 export function transcriptReplaced(
-  msgs: unknown,
+  msgs: CaptureTranscript | undefined,
   cursor: { msgs: number; fp?: string },
 ): boolean {
   if (!Array.isArray(msgs)) return false;
@@ -132,7 +133,10 @@ export function transcriptReplaced(
  * unknown shape) or when nothing was consumed, so the caller's existing
  * thin-check still applies.
  */
-export function deltaMessages(msgs: unknown, since: number): unknown {
+export function deltaMessages<T>(
+  msgs: readonly T[] | undefined,
+  since: number,
+): readonly T[] | undefined {
   if (!Array.isArray(msgs) || since <= 0) return msgs;
   // A context that shrank past the cursor is a REPLACED transcript (compaction),
   // not a window that has been fully mined. Mine what is there:
@@ -158,17 +162,13 @@ const GUIDED_MARKER =
   /\b(must|never|always|shall|rule|spec|requirement|mandatory|forbidden)\b/i;
 
 export function guidedStatementInWindow(
-  msgs: unknown,
+  msgs: CaptureTranscript | undefined,
   sinceMsgs: number,
 ): boolean {
   if (!Array.isArray(msgs)) return true;
   const window = msgs.slice(Math.max(0, sinceMsgs));
   if (window.length === 0) return false;
-  // The SAME decode the transcript uses: roles come from
-  // `info.role` / `role` / `type`, text from `parts[]` / `content[]` / `text` /
-  // a string `content`. Reading one narrow shape here meant a genuine user rule
-  // in any other accepted shape got a no-signal skip before generation — the
-  // exact loss this guard exists to prevent.
+  // Shared normalized roles keep the signal check and prompt in agreement.
   const turns = conversationTurns(window);
   if (turns.length === 0) {
     // Nothing in the window decoded to a conversation turn. That is either a

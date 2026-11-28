@@ -9,8 +9,37 @@ import {
   turn,
 } from "./support/harness.ts";
 import { DELAYS_MS } from "./support/teardown-probe-plugin/index.ts";
+import { startServer } from "./support/server.ts";
 
 const TRIALS = 3;
+
+test("cooperative server shutdown invokes and awaits asynchronous plugin cleanup", async () => {
+  const fake = await startFake();
+  const guest = makeGuest(
+    fake,
+    join(import.meta.dir, "support", "teardown-probe-plugin"),
+  );
+  const file = join(guest.root, "cleanup-receipts.txt");
+  guest.env.TEARDOWN_PROBE_OUT = file;
+  let server: Awaited<ReturnType<typeof startServer>> | undefined;
+  try {
+    server = await startServer(guest);
+    fake.setSteps({ "TEARDOWN-PROBE": [{ content: "done" }] });
+    const run = await turn(fake, guest, "TEARDOWN-PROBE", 60_000, server.url);
+    expect(
+      loadFailure(run),
+      `${run.stderr}\n${JSON.stringify(run.errors())}`,
+    ).toBeUndefined();
+    await server.stop();
+    const receipts = readFileSync(file, "utf8").trim().split("\n");
+    expect(receipts).toContain("cleanup-start");
+    expect(receipts).toContain("cleanup-end");
+  } finally {
+    await server?.stop();
+    fake.stop();
+    rmSync(guest.root, { recursive: true, force: true });
+  }
+}, 120_000);
 
 test("reports which turn-end handler waits survive OpenCode shutdown", async () => {
   const fake = await startFake();
@@ -52,6 +81,9 @@ test("reports which turn-end handler waits survive OpenCode shutdown", async () 
       const count = (receipt: string) =>
         trials.filter((receipts) => receipts.has(receipt)).length;
       const arrived = count("arrived");
+      console.log(
+        `[teardown-cleanup] start=${count("cleanup-start")} end=${count("cleanup-end")} beforeExit=${count("beforeExit")} exit=${count("exit")}`,
+      );
       const completion = DELAYS_MS.map(
         (ms) => `${ms}ms=${count(`timer:${ms}`)}/${arrived}`,
       ).join(" ");

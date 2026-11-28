@@ -103,3 +103,88 @@ jobs:
     env:
       OPENCODE_VERSION: 2.4.1
     steps: *opencode_smoke_steps
+
+  oh-my-pi:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      OPENCODE_VERSION: 2.0.26
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun install --cwd integration/oh-my-pi --frozen-lockfile
+      - name: Install pinned OpenCode for cross-harness checks
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "$HOME/.local/bin" "$RUNNER_TEMP/oc"
+          npm pack "@opencode/cli-linux-x64@$OPENCODE_VERSION" --pack-destination "$RUNNER_TEMP/oc"
+          tar -xzf "$RUNNER_TEMP/oc/opencode-cli-linux-x64-$OPENCODE_VERSION.tgz" -C "$RUNNER_TEMP/oc"
+          install -m 755 "$RUNNER_TEMP/oc/package/bin/opencode" "$HOME/.local/bin/opencode"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/opencode" --version
+      - name: Install pinned OpenCode on Windows for cross-harness checks
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cliDir = Join-Path $env:RUNNER_TEMP 'oc'
+          New-Item -ItemType Directory -Path $cliDir -Force | Out-Null
+          npm pack "@opencode/cli-windows-x64@$env:OPENCODE_VERSION" --pack-destination $cliDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          tar -xzf (Join-Path $cliDir "opencode-cli-windows-x64-$env:OPENCODE_VERSION.tgz") -C $cliDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $cliPath = Join-Path $cliDir 'package/bin/opencode.exe'
+          "OPENCODE_BIN=$cliPath" >> $env:GITHUB_ENV
+          & $cliPath --version
+      - name: SDK contracts and packed installation
+        run: bun run test:oh-my-pi
+
+  pi:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      OPENCODE_VERSION: 2.0.26
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun install --cwd integration/pi --frozen-lockfile
+      - run: bun install --cwd integration/oh-my-pi --frozen-lockfile
+      - name: Install pinned OpenCode for cross-harness checks
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "$HOME/.local/bin" "$RUNNER_TEMP/oc"
+          npm pack "@opencode/cli-linux-x64@$OPENCODE_VERSION" --pack-destination "$RUNNER_TEMP/oc"
+          tar -xzf "$RUNNER_TEMP/oc/opencode-cli-linux-x64-$OPENCODE_VERSION.tgz" -C "$RUNNER_TEMP/oc"
+          install -m 755 "$RUNNER_TEMP/oc/package/bin/opencode" "$HOME/.local/bin/opencode"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/opencode" --version
+      - name: Install pinned OpenCode on Windows for cross-harness checks
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cliDir = Join-Path $env:RUNNER_TEMP 'oc'
+          New-Item -ItemType Directory -Path $cliDir -Force | Out-Null
+          npm pack "@opencode/cli-windows-x64@$env:OPENCODE_VERSION" --pack-destination $cliDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          tar -xzf (Join-Path $cliDir "opencode-cli-windows-x64-$env:OPENCODE_VERSION.tgz") -C $cliDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $cliPath = Join-Path $cliDir 'package/bin/opencode.exe'
+          "OPENCODE_BIN=$cliPath" >> $env:GITHUB_ENV
+          & $cliPath --version
+      - name: SDK contracts and packed installation
+        run: bun run test:pi

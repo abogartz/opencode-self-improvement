@@ -22,6 +22,13 @@ Restart OpenCode. For the desktop app, run `opencode service restart`.
 
 To seed your repo's build, test, lint, and typecheck commands, run `/repo-init` in OpenCode. Use `/repo-init force` after a refactor. [See manual, pinned, and checkout installs](docs/reference/install.md).
 
+Upstream Pi: see [installation and compatibility](README.pi.md).
+
+An [unreleased oh-my-pi adapter](README.oh-my-pi.md) is available on this
+work branch. It shares the memory store and provides tools, prompt context, and
+contextual tool pulls, and automatic turn-end capture; the OpenCode features
+described below do not all apply to it.
+
 ![Ten-second demo: remember, recall, correct, undo](docs/assets/demo.gif)
 *Scripted turns using the real plugin and store with a fake model. Regenerate with `vhs demo.tape`.*
 
@@ -89,6 +96,7 @@ CI runs `bun run gate` (typecheck + lint + unit tests + terminal smoke and BDD) 
 bun run gate          # full gate: typecheck + lint + tests + smoke
 bun run gate:hooks    # once per clone: run the gate on `git push`
 bun run test          # unit tests (tests/)
+bun run test:simulator # scripted host scenarios; no harness CLI or model service
 bun run test:e2e      # BDD integration (e2e/) — needs opencode on PATH or OPENCODE_BIN
 ```
 

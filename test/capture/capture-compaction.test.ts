@@ -398,6 +398,7 @@ describe("auto-capture end-to-end (session.compaction hook -> gate)", () => {
 
     await loaded.cleanup();
     expect(loaded.capture.events.signals.every((s) => s.aborted)).toBe(true);
+    const beforeLateHook = evidence();
 
     loaded.capture.context.messages = [{ role: "user", content: THICK_TEXT }];
     loaded.capture.generate.response = JSON.stringify([
@@ -408,8 +409,9 @@ describe("auto-capture end-to-end (session.compaction hook -> gate)", () => {
     expect(loaded.capture.generate.calls.length).toBe(0);
     expect(loaded.capture.context.calls.length).toBe(0);
 
-    // The hook contract (T2 rollup + anchor) still runs after cleanup.
-    expect(evidence().some((l) => l.ev === "t2_compaction")).toBe(true);
+    // Disposal stops admission to both bookkeeping and capture.
+    expect(evidence()).toEqual(beforeLateHook);
+    expect(evidence().some((l) => l.ev === "t2_compaction")).toBe(false);
   });
 });
 

@@ -30,15 +30,18 @@ import { renderMemoryReport } from "../status/report.ts";
 import { blockedRecent } from "../status/write.ts";
 import { summarizeStore } from "../status/store-summary.ts";
 import { droppedEvidenceWrites } from "../telemetry/record.ts";
+import { hitsFile } from "../telemetry/ledger.ts";
+import { readLines } from "../core/logfmt/read.ts";
+import { summarizeHarnessActivity } from "../status/harness-stats.ts";
+import { currentHarness } from "../telemetry/harness.ts";
 
 export const register: ToolRegister = (editor, deps) => {
-  const { toolIds, sessions, direct } = deps;
+  const { toolIds, sessions } = deps;
   editor.add(
     validated(EmptyArgs, {
       name: "memory_status",
       description:
-        "Plain-text memory report for chat clients (desktop/web/IDE), same sections as the terminal /memory panel: CONTEXT (this session's injected block, budget use, cumulative ride and abstentions), CACHE (epochs whose bytes moved, plus provider-reported cache receipts; byte changes are not a cache-miss estimate), the block verbatim, recent blocked writes with gate reasons (filtered to this reader's evidence visibility, #306), and store stats. Aggregate STORE counts are machine-wide — they count every repository's rows by decision (#213 B), not this reader's. Reads only — no model call.",
-      options: direct,
+        "Read-only memory report: CONTEXT (this session's injected block, budget use, cumulative ride and abstentions), CACHE (changed epochs and provider-reported cache receipts; byte changes are not a cache-miss estimate), the block verbatim, recent blocked writes visible to this reader, STORE stats, and HARNESS ACTIVITY (combined and per-harness retrievals, reported session tokens, and capture estimates). Aggregate counts cover the shared store across repositories; memory ownership stays project/global. No model call.",
       async execute(_args, context): Promise<{ content: string }> {
         // In-process truth: the live epoch + ledger, fresher than any file.
         const sid = toolIds(context).sid;
@@ -81,9 +84,15 @@ export const register: ToolRegister = (editor, deps) => {
         // the plugin's own model calls, billed. Same evidence read, so
         // the number cannot disagree with the lag line above it.
         store.captureCost = captureCost(evidenceLines);
+        const harnessActivity = summarizeHarnessActivity(
+          evidenceLines,
+          await readLines(hitsFile()),
+        );
+        const harness = currentHarness();
         return {
           content: renderMemoryReport({
             status,
+            harnessActivity,
             store,
             blocked: await blockedRecent(6, reportReader, sid),
             quarantined: act
@@ -91,7 +100,11 @@ export const register: ToolRegister = (editor, deps) => {
               .map((m) => ({ ts: m.ts, patterns: quarantineReasons(m) })),
             // capture state read from the same evidence window, so the
             // chat surface distinguishes off / misconfigured / inert / alive.
-            capture: captureHealth(evidenceLines),
+            captureHarness: harness,
+            capture:
+              harnessActivity.harnesses.find(
+                (group) => group.harness === harness,
+              )?.captureHealth ?? captureHealth([]),
             // Lost evidence writes cannot report themselves through the log, so
             // this one number comes from this process instead.
             evidence: droppedEvidenceWrites(),

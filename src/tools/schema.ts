@@ -18,6 +18,7 @@ import { type ZodTypeAny, z } from "zod";
 import { STATUSES, TYPES } from "../core/types.ts";
 import { MAX_KEYWORDS } from "../store/model/memory.ts";
 import { flattenMemoryText } from "../store/sanitize.ts";
+import type { MemoryTool, ToolCallContext } from "../host/contracts.ts";
 
 type JSONSchema = Record<string, unknown>;
 
@@ -296,12 +297,12 @@ export function wire(schema: ZodTypeAny): JSONSchema {
 export interface ToolDef<S extends ZodTypeAny> {
   name: string;
   description: string;
-  options: { codemode: false };
-  // The second argument is the host's per-call execution context (V2 SDK
-  // ToolContext carries sessionID/messageID/id). It is optional because the
-  // V1-shaped test harness and direct callers omit it; tools must fall back
-  // to the ambient current, which is only safe SYNCHRONOUSLY at entry.
-  execute(args: z.infer<S>, context?: unknown): Promise<{ content: string }>;
+  // Adapters normalize the caller before entry. Legacy calls can omit it;
+  // their ambient fallback is safe only synchronously at tool entry.
+  execute(
+    args: z.infer<S>,
+    context?: ToolCallContext,
+  ): Promise<{ content: string }>;
 }
 
 /**
@@ -313,13 +314,13 @@ export interface ToolDef<S extends ZodTypeAny> {
 export function validated<S extends ZodTypeAny>(
   schema: S,
   def: ToolDef<S>,
-): ToolDef<S> & { input: JSONSchema } {
+): MemoryTool {
   return {
     ...def,
     input: wire(schema),
     async execute(
       raw: unknown,
-      context?: unknown,
+      context?: ToolCallContext,
     ): Promise<{ content: string }> {
       const parsed = schema.safeParse(raw ?? {});
       if (!parsed.success) {

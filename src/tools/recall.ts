@@ -34,13 +34,12 @@ function scoreMemory(m: Memory, q: string): number {
 }
 
 export const register: ToolRegister = (editor, deps) => {
-  const { toolIds, noteHits, direct } = deps;
+  const { toolIds, noteHits } = deps;
   editor.add(
     validated(RecallArgs, {
       name: "memory_recall",
       description:
         "Look up durable project knowledge — build/test/lint commands, decisions, patterns, preferences, blockers — BEFORE searching the repo or reading files. Use for 'how do I run X', conventions, and past decisions. By scope, type, or free-text query; with no filters it returns the most recent memories. Returns at most 5 rows by default, best match first — pass `limit` when you genuinely need a wider sweep.",
-      options: direct,
       async execute(args, context): Promise<{ content: string }> {
         const { sid, call } = toolIds(context);
         const reader = readerFromSid(sid);

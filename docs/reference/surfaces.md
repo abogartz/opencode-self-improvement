@@ -1,7 +1,7 @@
 # Surfaces
 
-Four ways to see the same data. All of them read `memory_status`; none of them
-makes a model call.
+The terminal panel and chat report show session and shared-store statistics.
+The browser editor manages the store directly. These surfaces make no model call.
 
 ## Terminal (opencode CLI)
 
@@ -24,7 +24,38 @@ The plugin ships a TUI half (`@opencode/plugin/tui`) that loads automatically.
 ## Desktop / web / IDE
 
 The terminal slots do not exist there, so use the self-installed
-**`/memory-report`** chat command: the same sections rendered in the conversation.
+**`/memory-report`** chat command: session and store sections rendered in the
+conversation, plus the harness activity breakdown below. In other supported
+harnesses, ask the agent to call `memory_status`.
+
+## Combined and per-harness activity
+
+`memory_status` and OpenCode's `/memory-report` include **HARNESS ACTIVITY**:
+
+- Combined totals and separate rows for `opencode`, `oh-my-pi`, and any other
+  adapter with retained telemetry.
+- Credited injection, contextual pull, and recall events; blocked writes;
+  completed capture calls, estimated capture tokens, captured rows, and capture
+  lag percentiles. Each harness has its own latest capture configuration.
+- Reported session tokens, keeping input, cache-read, cache-write, output, and
+  reasoning separate when the host supplies that split. Missing usage is
+  **not reported**, not zero. Without a reasoning split, output includes reasoning;
+  a mixed aggregate cannot establish a complete answer/reasoning split.
+
+The breakdown covers retained telemetry in the trailing thirty days. Retrieval
+credits are throttled, and rotated or dropped records can reduce counts. These
+are observed activity counts, not lifetime totals. Usage uses the latest retained
+snapshot per harness/session; repeated snapshots are not added. A snapshot may
+include work before the window, and older per-message sources only include
+messages observed during that runtime. Capture token estimates remain separate
+from provider-reported session tokens and exclude unreported reasoning.
+
+Old records without a harness field count as **OpenCode**. New activity whose
+source cannot be identified is explicitly **unknown**. No migration is needed.
+STORE inventory remains shared: a memory does not belong to a harness, and one
+memory recalled through two harnesses still counts as one stored memory. The
+terminal `/memory` panel retains its session view; use `/memory-report` for this
+breakdown.
 
 ## Browser editor
 

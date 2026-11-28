@@ -6,13 +6,12 @@ import { pruneMemory } from "../store/prune.ts";
 import { ForgetArgs, validated } from "./schema.ts";
 
 export const register: ToolRegister = (editor, deps) => {
-  const { toolIds, bindSessionIdentity, direct } = deps;
+  const { toolIds, bindSessionIdentity } = deps;
   editor.add(
     validated(ForgetArgs, {
       name: "memory_forget",
       description:
         "Delete memories by scope and type. Snapshots first, logs the reason for audit, never touches a repo.",
-      options: direct,
       async execute(args, context): Promise<{ content: string }> {
         const { sid } = toolIds(context);
         // Identity before the prune's repo floor: resolve the session

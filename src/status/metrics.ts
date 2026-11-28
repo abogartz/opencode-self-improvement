@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { evidenceDir } from "../core/config/paths.ts";
 import { parseLine } from "../core/logfmt/format.ts";
 import { readLines } from "../core/logfmt/read.ts";
+import { recordedHarness } from "../telemetry/harness.ts";
 
 /**
  * True when the ledger cannot honestly cover the 30-day window: its first
@@ -142,7 +143,7 @@ export function captureCost(
       Number(f.est_tokens) ||
       Math.ceil((chars + (Number(f.text_chars) || 0)) / 4);
     const sid = typeof f.session === "string" ? f.session : "";
-    if (sid) seen.add(sid);
+    if (sid) seen.add(`${recordedHarness(f.harness)}\0${sid}`);
   }
   out.sessions = seen.size;
   return out;

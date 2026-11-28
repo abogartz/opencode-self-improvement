@@ -59,6 +59,11 @@ const fixture = withTempStore({ prefix: "osi-capture-avail-" });
 describe("capture availability refusal", () => {
   let plugin: Awaited<ReturnType<typeof loadPlugin>> | undefined;
 
+  afterEach(async () => {
+    await plugin?.cleanup();
+    plugin = undefined;
+  });
+
   /** A git repo whose tracked tree states the tax rule and declares `deploy`. */
   function makeRepo(name: string, tracked = true): string {
     const repo = join(fixture.root, name);
@@ -123,11 +128,13 @@ describe("capture availability refusal", () => {
       type: "session.execution.succeeded",
       data: { sessionID: sid },
     });
+    // The terminal receipt follows every candidate's write or refusal. An early
+    // receipt only proves the pass started and can precede all stored rows.
     await waitFor(() =>
-      readEvidenceLog().some((l) => String(l.session) === sid),
+      readEvidenceLog().some(
+        (l) => l.ev === "capture_lag" && String(l.session) === sid,
+      ),
     );
-    // Let every candidate's receipt land, not just the first.
-    await new Promise((r) => setTimeout(r, 250));
     return sid;
   }
 

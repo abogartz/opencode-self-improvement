@@ -51,9 +51,9 @@ describe("pending session identity", () => {
     return promise;
   }
 
-  function parked(result: unknown, fail = false) {
+  function parked<T>(result: T, fail = false) {
     const started = Promise.withResolvers<void>();
-    const pending = Promise.withResolvers<unknown>();
+    const pending = Promise.withResolvers<T>();
     const release = () =>
       fail
         ? pending.reject(new Error("host lookup failed"))
@@ -64,7 +64,7 @@ describe("pending session identity", () => {
     const value = {
       // biome-ignore lint/suspicious/noThenProperty: intentional thenable signals when the async host fake awaits it.
       then(
-        resolve: (value: unknown) => unknown,
+        resolve: (value: T) => unknown,
         reject: (reason: unknown) => unknown,
       ) {
         started.resolve();
@@ -78,29 +78,25 @@ describe("pending session identity", () => {
     "joins a pending %s lookup before returning identity",
     async (phase) => {
       const sid = `ses-pending-${phase}`;
-      const lookup = parked(
-        phase === "messages"
-          ? [{ location: { directory: b } }]
-          : { location: { directory: b } },
-      );
+      const lookup = parked(b);
       let lookups = 0;
-      const session = {
-        async context() {
-          expect(this).toBe(session);
-          if (phase !== "messages") return [];
+      const directories = {
+        async fromTranscript() {
+          expect(this).toBe(directories);
+          if (phase !== "messages") return undefined;
           lookups++;
           return lookup.value;
         },
-        async get() {
-          expect(this).toBe(session);
+        async fromSession() {
+          expect(this).toBe(directories);
           lookups++;
           return lookup.value;
         },
       };
-      const identity = createSessionContext(
-        { session },
-        { instanceDir: a, liveRoot: a },
-      );
+      const identity = createSessionContext(directories, {
+        instanceDir: a,
+        liveRoot: a,
+      });
       identity.toolIds({ sessionID: sid });
       const first = track(
         phase === "event-row"
@@ -133,15 +129,13 @@ describe("pending session identity", () => {
       let messages = 0;
       const identity = createSessionContext(
         {
-          session: {
-            async context() {
-              messages++;
-              return [];
-            },
-            async get() {
-              lookups++;
-              return lookup.value;
-            },
+          async fromTranscript() {
+            messages++;
+            return undefined;
+          },
+          async fromSession() {
+            lookups++;
+            return lookup.value;
           },
         },
         { instanceDir: a, liveRoot: a },

@@ -16,7 +16,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SessionEvent } from "@opencode/schema/session-event";
 import { Schema } from "effect";
-import { IDENTITY_EVENT_TYPES } from "../../src/identity/host-events.ts";
+import { IDENTITY_EVENT_TYPES } from "../../src/adapters/opencode/observations.ts";
 import { CAPTURE_EVENT_TYPES } from "../../src/index.ts";
 import moveRecording from "../fixtures/host-session-move.json";
 
@@ -134,7 +134,9 @@ describe("host event fidelity", () => {
 
   test("inline event-name reads are declared or explicitly legacy", () => {
     const offenders: string[] = [];
-    for (const file of readdirSync(SRC).filter((n) => n.endsWith(".ts"))) {
+    for (const file of readdirSync(SRC, { recursive: true }).filter(
+      (n): n is string => typeof n === "string" && n.endsWith(".ts"),
+    )) {
       readFileSync(join(SRC, file), "utf8")
         .split("\n")
         .forEach((line, i) => {

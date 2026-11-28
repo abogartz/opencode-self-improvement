@@ -152,14 +152,13 @@ describe("capture known-row context", () => {
       }
       await waitFor(() =>
         readEvidenceLog().some(
-          (e) => e.ev === "capture_lag" && e.session === "known-move",
+          (e) =>
+            e.ev === "auto_capture_skipped" &&
+            e.reason === "session_moved" &&
+            e.session === "known-move",
         ),
       );
-      const prompt = plugin.capture.generate.calls[0].prompt;
-      expect(prompt).toContain("A_ONLY");
-      expect(prompt).not.toContain("B_ONLY");
-      expect(prompt).not.toContain(token.slice(0, 60));
-      expect(prompt).toContain("[redacted]");
+      expect(plugin.capture.generate.calls).toHaveLength(0);
     });
   });
 });

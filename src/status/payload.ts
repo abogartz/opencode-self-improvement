@@ -132,10 +132,13 @@ export interface Measured {
    * reported", which the surfaces render as nothing — never as 0.
    */
   output?: number;
+  /** When missing, output includes reasoning without a separately reported split. */
   reasoning?: number;
 }
 
 export interface StatusPayload {
+  /** Adapter that produced this snapshot; absent legacy snapshots are OpenCode. */
+  harness?: string;
   /** ISO instant of the epoch recompute that produced this snapshot. */
   at: string;
   sessionID: string;
